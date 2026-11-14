@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ml">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Annie's Library</title>
+  <meta name="description" content="Find and read Malayalam books: free public-domain scans, previews, and where to buy the rest.">
+  <meta name="theme-color" content="#f7f3ec" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#15120f" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://archive.org">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manjari:wght@400;700&family=Noto+Sans+Malayalam:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="css/app.css">
+  <script>
+    // Apply saved theme before first paint (no flash).
+    try { var s = JSON.parse(localStorage.getItem('mlib:settings') || '{}'); if (s.theme === 'light' || s.theme === 'dark') document.documentElement.dataset.theme = s.theme; } catch (e) {}
+  </script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand-row">
+      <h1 class="brand">Annie's Library <small lang="ml">ആനിയുടെ ലൈബ്രറി · മലയാള പുസ്തകങ്ങൾ</small></h1>
+      <button class="icon-btn" id="theme-btn" aria-label="Theme: follow system"></button>
+    </div>
+    <div id="library-controls">
+      <form class="search" role="search" onsubmit="return false">
+        <span data-icon="search"></span>
+        <label for="q" class="sr-only">Search Malayalam books</label>
+        <input id="q" type="search" inputmode="search" autocomplete="off" autocapitalize="off" spellcheck="false"
+               placeholder="തിരയുക… or type in Manglish (e.g. indulekha)" enterkeyhint="search">
+        <button type="button" class="icon-btn clear" id="clear-q" aria-label="Clear search" hidden></button>
+      </form>
+      <p class="translit-hint" id="translit-hint" hidden></p>
+      <div class="chips" id="chips" role="toolbar" aria-label="Categories"></div>
+    </div>
+  </header>
+
+  <main id="main" tabindex="-1"></main>
+
+  <nav class="tabbar" aria-label="Sections">
+    <button class="tab" data-tab="library" aria-current="page"><span data-icon="library"></span><span>Library</span></button>
+    <button class="tab" data-tab="shelf"><span data-icon="shelf"></span><span>My Shelf</span></button>
+    <button class="tab" data-action="add-pdf"><span data-icon="upload"></span><span>Add my PDF</span></button>
+  </nav>
+
+  <input type="file" id="pdf-input" accept="application/pdf,.pdf" hidden>
+  <div class="app-toast" id="toast" role="status" hidden></div>
+
+  <noscript><p style="padding:16px">This app needs JavaScript.</p></noscript>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

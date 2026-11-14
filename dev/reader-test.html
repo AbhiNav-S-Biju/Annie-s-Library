@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ml">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Reader test</title>
+  <link rel="stylesheet" href="../css/app.css">
+</head>
+<body>
+  <main style="padding:24px">
+    <h1>Step 1 — reader test</h1>
+    <p>Hard-coded Internet Archive book: Indulekha (O. Chandu Menon, 1889).</p>
+    <button class="btn" id="open">Open Indulekha</button>
+  </main>
+  <script type="module">
+    import { openReader } from '../js/reader.js';
+    import { getBookManifest } from '../js/sources/ia.js';
+    const id = 'IndulekhafirstNovelOfMalayalam';
+    document.getElementById('open').onclick = () => {
+      const book = { key: 'ia:' + id, source: 'ia', archiveId: id, title: 'ഇന്ദുലേഖ — Indulekha', author: 'O. Chandu Menon' };
+      const source = getBookManifest(id).then((m) => ({ count: m.count, load: (i, o) => m.pageUrl(i, o.width) }));
+      window.__reader = openReader({ book, source, externalUrl: 'https://archive.org/details/' + id });
+    };
+  </script>
+</body>
+</html>

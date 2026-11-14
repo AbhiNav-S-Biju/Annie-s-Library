@@ -1,0 +1,19 @@
+{
+  "name": "Annie's Library — ആനിയുടെ ലൈബ്രറി",
+  "short_name": "Annie's Library",
+  "description": "Find and read Malayalam books: free public-domain scans, previews, and where to buy the rest.",
+  "lang": "ml",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7f3ec",
+  "theme_color": "#8c4a10",
+  "categories": ["books", "education"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

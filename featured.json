@@ -1,0 +1,88 @@
+[
+  {
+    "archiveId": "IndulekhafirstNovelOfMalayalam",
+    "title": "ഇന്ദുലേഖ (Indulekha)",
+    "author": "ഒ. ചന്തുമേനോൻ (O. Chandu Menon)",
+    "category": "novels",
+    "year": 1889,
+    "note": "The first major Malayalam novel."
+  },
+  {
+    "archiveId": "SreeBudhaCharithamKumaranAsan",
+    "title": "ശ്രീബുദ്ധചരിതം (Sree Buddha Charitham)",
+    "author": "എൻ. കുമാരനാശാൻ (N. Kumaran Asan)",
+    "category": "poetry",
+    "year": 1918
+  },
+  {
+    "archiveId": "vilasalathika1920vallathol",
+    "title": "വിലാസലതിക (Vilasalathika)",
+    "author": "വള്ളത്തോൾ നാരായണമേനോൻ (Vallathol)",
+    "category": "poetry",
+    "year": 1920
+  },
+  {
+    "archiveId": "in.ernet.dli.2015.277580",
+    "title": "കിരണാവലി (Kiranavali)",
+    "author": "ഉള്ളൂർ എസ്. പരമേശ്വരയ്യർ (Ulloor)",
+    "category": "poetry",
+    "year": 1925
+  },
+  {
+    "archiveId": "AitihyamalaKottarathilSankunniPart1",
+    "title": "ഐതിഹ്യമാല — ഭാഗം 1 (Aitihyamala, Part 1)",
+    "author": "കൊട്ടാരത്തിൽ ശങ്കുണ്ണി (Kottarathil Sankunni)",
+    "category": "history",
+    "note": "Legends of Kerala."
+  },
+  {
+    "archiveId": "Panchatantram_Malayalam-Kunchan_Nambiar",
+    "title": "പഞ്ചതന്ത്രം (Panchatantram)",
+    "author": "കുഞ്ചൻ നമ്പ്യാർ (Kunchan Nambiar)",
+    "category": "childrens"
+  },
+  {
+    "archiveId": "SubhadrarjjunamBhashaNadakam",
+    "title": "സുഭദ്രാർജ്ജുനം (Subhadrarjjunam)",
+    "author": "തോട്ടക്കാട്ട് ഇക്കാവമ്മ (Thottakkattu Ikkavamma)",
+    "category": "drama",
+    "year": 1901,
+    "note": "The first Malayalam play by a woman."
+  },
+  {
+    "archiveId": "GangavatharanamNadakam",
+    "title": "ഗംഗാവതരണം (Gangavatharanam)",
+    "author": "കൊടുങ്ങല്ലൂർ കുഞ്ഞിക്കുട്ടൻ തമ്പുരാൻ (Kunjikkuttan Thampuran)",
+    "category": "drama",
+    "year": 1892
+  },
+  {
+    "archiveId": "1915_Sree_Mahabhagavatham",
+    "title": "ശ്രീമഹാഭാഗവതം (Sree Mahabhagavatham)",
+    "author": "തുഞ്ചത്ത് എഴുത്തച്ഛൻ (Thunchath Ezhuthachan)",
+    "category": "religion",
+    "year": 1915
+  },
+  {
+    "archiveId": "kerala-sahitya-charitram-vol-2-ulloor-1954-ku",
+    "title": "കേരളസാഹിത്യചരിത്രം — വാല്യം 2 (Kerala Sahitya Charitram, Vol 2)",
+    "author": "ഉള്ളൂർ (Ulloor)",
+    "category": "history",
+    "year": 1954
+  },
+  {
+    "archiveId": "SabdaSodhiniMalayalamGrammar",
+    "title": "ശബ്ദശോധിനി (Sabda Sodhini)",
+    "author": "എ. ആർ. രാജരാജവർമ്മ (A. R. Rajaraja Varma)",
+    "category": "other",
+    "year": 1918,
+    "note": "Classic Malayalam grammar."
+  },
+  {
+    "archiveId": "GadyamalikaPartI",
+    "title": "ഗദ്യമാലിക — ഭാഗം 1 (Gadyamalika, Part 1)",
+    "author": "രാമവർമ്മ (H. H. Rama Varma)",
+    "category": "other",
+    "year": 1921
+  }
+]

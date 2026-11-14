@@ -47,16 +47,30 @@ async function init() {
 }
 
 async function loadFeatured() {
-  try {
-    const res = await fetch(CONFIG.featuredPath, { cache: 'no-cache' });
-    if (!res.ok) throw new HttpError(res.status, CONFIG.featuredPath);
-    const list = await res.json();
+  const use = (list) => {
     state.featured = list.filter((f) => f.archiveId && !CONFIG.blockedArchiveIds.includes(f.archiveId)).map(featuredToBook);
     state.featuredError = null;
-  } catch (e) {
-    state.featured = [];
-    state.featuredError = e;
+  };
+  let lastErr;
+  for (let i = 0; i < 3; i++) {
+    try {
+      if (i) await new Promise((r) => setTimeout(r, 700 * i));
+      const res = await fetch(CONFIG.featuredPath, { cache: 'no-cache' });
+      if (!res.ok) throw new HttpError(res.status, CONFIG.featuredPath);
+      const list = await res.json();
+      if (!Array.isArray(list)) throw new Error('featured list is not an array');
+      use(list);
+      store.set('featured-copy', list); // last good copy, for flaky networks
+      return;
+    } catch (e) {
+      lastErr = e;
+    }
   }
+  // Network failed: fall back to the last list we saw, so the shelf never comes up empty.
+  const copy = store.get('featured-copy');
+  if (Array.isArray(copy) && copy.length) { use(copy); return; }
+  state.featured = [];
+  state.featuredError = lastErr;
 }
 
 function featuredToBook(f) {
@@ -103,7 +117,7 @@ function bindUi() {
     if (card) { openSheet(findBook(card.dataset.book)); return; }
     const act = e.target.closest('[data-act]');
     if (!act) return;
-    if (act.dataset.act === 'retry') search();
+    if (act.dataset.act === 'retry') retryAll();
     if (act.dataset.act === 'clear') { q.value = ''; $('#clear-q').hidden = true; setQuery(''); }
     if (act.dataset.act === 'all') setCategory('all');
     if (act.dataset.act === 'library') setTab('library');
@@ -122,8 +136,19 @@ function bindUi() {
   }, true);
   document.addEventListener('error', (e) => { if (e.target.classList?.contains('cover-img')) coverFail(e.target); }, true);
 
-  window.addEventListener('online', () => search());
+  window.addEventListener('online', retryAll);
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
+}
+
+/** "Try again" / back online: reload the featured list too if it failed, then search. */
+async function retryAll() {
+  if (state.featuredError || !state.featured.length) {
+    state.featuredError = null;
+    state.pending = ['init'];
+    renderLibrary();
+    await loadFeatured();
+  }
+  search();
 }
 
 function coverFail(img) {
@@ -258,7 +283,9 @@ function renderLibrary() {
     html += section('Featured', 'തിരഞ്ഞെടുത്തവ', featured, {
       loading: loading && !featured.length && !state.featured.length && !state.featuredError,
       empty: state.featuredError
-        ? errorState('Couldn’t load the featured list.', `${CONFIG.featuredPath} — ${state.featuredError.message}`)
+        ? errorState('Couldn’t load the featured books.', navigator.onLine
+          ? `Check your connection and tap Try again. (${state.featuredError.status ? `HTTP ${state.featuredError.status}` : 'network error'})`
+          : 'You’re offline. They’ll appear when you’re back online.')
         : emptyState(`No featured books in ${cat.label}.`, 'Try another category, or browse everything below.', '<button class="btn small" data-act="all">Show all</button>'),
     });
     html += section(state.category === 'all' ? 'More free books' : `More free ${cat.label.toLowerCase()}`, 'സൗജന്യം · Internet Archive', more, {

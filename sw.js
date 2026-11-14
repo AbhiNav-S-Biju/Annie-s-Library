@@ -1,6 +1,6 @@
 // Service worker: app shell offline, libraries/fonts cached, covers cached (capped).
 // Bump VERSION whenever you change files in SHELL so phones pick up the new build.
-const VERSION = 'v3';
+const VERSION = 'v4';
 const SHELL_CACHE = `shell-${VERSION}`;
 const LIB_CACHE = 'libs-v1';
 const COVER_CACHE = 'covers-v1';
@@ -80,18 +80,22 @@ self.addEventListener('fetch', (e) => {
 
 async function networkFirst(req, name, timeoutMs) {
   const cache = await caches.open(name);
-  const net = fetch(req).then((res) => {
-    if (res.ok) cache.put(req, res.clone());
+  const attempt = () => fetch(req).then((res) => {
+    if (res.ok) cache.put(req, res.clone()).catch(() => {});
     return res;
   });
+  // One quick retry: a request made while the device is waking up or switching networks often fails once.
+  const net = attempt().catch(() => new Promise((r) => setTimeout(r, 800)).then(attempt));
   const timeout = new Promise((resolve) => setTimeout(resolve, timeoutMs, null));
   try {
     const res = await Promise.race([net, timeout]);
     if (res) return res;
   } catch { /* offline: fall through to cache */ }
-  const hit = await cache.match(req, { ignoreSearch: true });
+  // Current cache first, then any older cache (e.g. right after an update replaced the shell cache).
+  const hit = (await cache.match(req, { ignoreSearch: true })) || (await caches.match(req, { ignoreSearch: true }));
   if (hit) return hit;
-  try { return await net; } catch { return new Response('Offline', { status: 503 }); }
+  // Surface a real network error (fetch rejects) rather than inventing an HTTP status.
+  try { return await net; } catch { return Response.error(); }
 }
 
 async function cacheFirst(req, name, max) {

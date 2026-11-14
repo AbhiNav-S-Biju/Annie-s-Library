@@ -1,7 +1,7 @@
 import { CONFIG } from './config.js';
 import * as store from './storage.js';
 import { icons } from './icons.js';
-import { runSearch } from './search.js';
+import { runSearch, sortBooks, SORTS } from './search.js';
 import { getBookManifest, getItemMeta } from './sources/ia.js';
 import { getOpenLibraryDescription } from './sources/openlibrary.js';
 import { openReader, escapeHtml } from './reader.js';
@@ -23,6 +23,8 @@ const state = {
   pending: [],
   errors: {},
   alt: [],
+  field: 'all',      // 'all' | 'author'
+  sort: 'relevance', // see SORTS in search.js
   searchCtrl: null,
 };
 
@@ -33,6 +35,7 @@ async function init() {
   document.querySelectorAll('[data-icon]').forEach((el) => { el.innerHTML = icons[el.dataset.icon] || ''; });
   $('#clear-q').innerHTML = icons.close;
   renderChips();
+  initToolbar();
   applyTheme();
   bindUi();
   renderLibrary(); // skeletons right away
@@ -162,6 +165,8 @@ function search() {
     text: state.query,
     category: state.category,
     featured: state.featured,
+    field: state.field,
+    sort: state.sort,
     signal: ctrl.signal,
     onUpdate: ({ books, pending, errors, alt }) => {
       if (ctrl.signal.aborted) return;
@@ -178,6 +183,56 @@ function renderChips() {
   $('#chips').innerHTML = CONFIG.categories.map((c) =>
     `<button class="chip" data-cat="${c.id}" aria-pressed="${state.category === c.id}">${esc(c.label)} <small lang="ml">${esc(c.ml)}</small></button>`).join('');
   $('#chips').querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => setCategory(b.dataset.cat)));
+}
+
+function initToolbar() {
+  const saved = store.getSettings().sort;
+  if (SORTS.some((s) => s.id === saved)) state.sort = saved;
+  const sel = $('#sort');
+  sel.innerHTML = SORTS.map((s) => `<option value="${s.id}">${esc(s.label)}</option>`).join('');
+  sel.value = state.sort;
+  sel.addEventListener('change', () => setSort(sel.value));
+  $('#scope').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-field]');
+    if (b) setField(b.dataset.field);
+  });
+  renderScope();
+}
+
+function renderScope() {
+  $('#scope').querySelectorAll('[data-field]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.field === state.field)));
+  $('#q').placeholder = state.field === 'author'
+    ? 'Author name… (e.g. Kumaran Asan, കുമാരനാശാൻ)'
+    : 'തിരയുക… or type in Manglish (e.g. indulekha)';
+}
+
+function setField(f) {
+  if (f === state.field) return;
+  state.field = f;
+  renderScope();
+  if (state.query) search();
+  $('#q').focus({ preventScroll: true });
+}
+
+function setSort(sort) {
+  state.sort = sort;
+  $('#sort').value = sort;
+  store.setSetting('sort', sort);
+  if (state.tab === 'library') search(); else renderShelf();
+}
+
+/** Search for everything by one author (from the detail sheet). */
+function searchAuthor(author) {
+  // Featured authors are "ഒ. ചന്തുമേനോൻ (O. Chandu Menon)": the Latin part matches more sources.
+  const m = String(author).match(/\(([^)]+)\)/);
+  const name = (m ? m[1] : String(author).split(/[,;]/)[0]).trim();
+  sheetClose?.();
+  state.field = 'author';
+  renderScope();
+  $('#q').value = name;
+  $('#clear-q').hidden = false;
+  state.query = '';
+  setQuery(name);
 }
 
 function renderTranslitHint() {
@@ -198,8 +253,8 @@ function renderLibrary() {
 
   if (!state.query) {
     if (state.category === 'all') html += continueReadingSection();
-    const featured = state.books.filter((b) => b.featured);
-    const more = state.books.filter((b) => !b.featured);
+    const featured = sortBooks(state.books.filter((b) => b.featured), state.sort);
+    const more = sortBooks(state.books.filter((b) => !b.featured), state.sort);
     html += section('Featured', 'തിരഞ്ഞെടുത്തവ', featured, {
       loading: loading && !featured.length && !state.featured.length && !state.featuredError,
       empty: state.featuredError
@@ -211,7 +266,8 @@ function renderLibrary() {
       empty: state.errors.ia ? sourceError('ia', state.errors.ia) : emptyState('Nothing else found here.', 'Internet Archive has no openly readable books in this category right now.'),
     });
   } else {
-    html += section(`Results for “${esc(state.query)}”`, cat.id === 'all' ? '' : cat.label, state.books, {
+    const label = state.field === 'author' ? `Books by “${esc(state.query)}”` : `Results for “${esc(state.query)}”`;
+    html += section(label, cat.id === 'all' ? '' : cat.label, sortBooks(state.books, state.sort), {
       loading: loading && !state.books.length,
       more: loading && state.books.length,
       empty: Object.keys(state.errors).length >= 3 || !navigator.onLine
@@ -276,7 +332,7 @@ function cardHtml(b) {
   return `<li><button class="card" data-book="${esc(b.key)}" aria-label="${esc(label)}">
       ${coverHtml(b)}
       <span class="card-title">${esc(b.title)}</span>
-      ${b.author ? `<span class="card-author">${esc(b.author)}</span>` : ''}
+      ${b.author || b.year ? `<span class="card-author">${b.year ? `<span class="card-year">${esc(b.year)}</span>${b.author ? ' · ' : ''}` : ''}${esc(b.author || '')}</span>` : ''}
     </button></li>`;
 }
 
@@ -369,7 +425,7 @@ function renderSheet(body, book, signal) {
       ${coverHtml(book, { badge: false })}
       <div>
         <h2 class="detail-title">${esc(book.title)}</h2>
-        ${book.author ? `<p class="detail-meta">${esc(book.author)}</p>` : ''}
+        ${book.author && !book.isLocal ? `<p class="detail-meta"><button class="author-link" data-author="${esc(book.author)}" aria-label="More books by ${esc(book.author)}">${esc(book.author)}</button></p>` : book.author ? `<p class="detail-meta">${esc(book.author)}</p>` : ''}
         <p class="detail-meta">${metaBits.map((m) => `<span>${esc(m)}</span>`).join('')}</p>
         <p class="detail-meta"><span class="badge ${book.isLocal ? 'MINE' : book.state}" style="position:static;display:inline-block;margin-top:6px">${book.isLocal ? 'My PDF' : BADGE[book.state]}</span></p>
       </div>
@@ -395,6 +451,7 @@ function renderSheet(body, book, signal) {
     toast(next ? `Added to “${store.STATUSES.find((s) => s.id === next).label}”` : 'Removed from shelf');
   }));
   body.querySelector('[data-read]')?.addEventListener('click', () => openBook(book));
+  body.querySelector('[data-author]')?.addEventListener('click', (e) => searchAuthor(e.currentTarget.dataset.author));
   body.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => {
     store.setProgress(book.key, +b.dataset.goto, prog?.total || 0);
     openBook(book);
@@ -559,6 +616,7 @@ function setTab(tab) {
   state.tab = tab;
   document.querySelectorAll('.tab[data-tab]').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false'));
   $('.search').hidden = tab !== 'library';
+  $('#scope').hidden = tab !== 'library';
   $('#translit-hint').hidden = tab !== 'library' || !state.alt?.length || !state.query;
   if (tab === 'shelf') renderShelf(); else renderLibrary();
   window.scrollTo({ top: 0 });
@@ -584,6 +642,7 @@ function renderShelf() {
   for (const g of groups) {
     if (!g.items.length) continue;
     g.items.sort((a, b) => b.updated - a.updated);
+    if (state.sort !== 'relevance') g.items = sortBooks(g.items.map((e) => ({ ...e.book, _e: e })), state.sort).map((b) => b._e);
     html += `<section class="section shelf-group"><div class="section-h"><h2>${esc(g.title)}</h2><span class="count">${g.items.length} · ${esc(g.ml)}</span></div>
       <ul class="grid" role="list">${g.items.map((e) => cardHtml(e.book)).join('')}</ul></section>`;
   }

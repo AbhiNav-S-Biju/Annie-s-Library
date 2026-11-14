@@ -9,6 +9,8 @@ backend, no build step, no accounts.
 - **Preview**: Google Books limited previews (link out).
 - **Buy**: in-copyright books get search links to Amazon.in, Flipkart and DC Books. No scraping, no store APIs.
 - **Add my PDF**: read a PDF you own in the same reader. It stays on your device.
+- **Search by author** (or title & author), and **sort** by best match, oldest first or newest
+  first. Tap an author's name in a book's details to see all their books.
 - **My Shelf**: Want to read / Reading / Finished, bookmarks, and last-read page, all stored locally.
 - Installable PWA. The app shell, your shelf and saved PDFs work offline.
 

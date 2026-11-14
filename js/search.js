@@ -48,7 +48,8 @@ export function fuzzyScore(query, target) {
   return total / q.length;
 }
 
-export function bookScore(query, b) {
+export function bookScore(query, b, field = 'all') {
+  if (field === 'author') return fuzzyScore(query, b.author || '');
   return Math.max(fuzzyScore(query, b.title || ''), 0.9 * fuzzyScore(query, b.author || ''),
     0.8 * fuzzyScore(query, `${b.title} ${b.author}`));
 }
@@ -109,9 +110,9 @@ export function mergeResults(lists) {
   return out;
 }
 
-export function rank(books, query) {
+export function rank(books, query, field = 'all') {
   return books
-    .map((b) => ({ b, s: query ? bookScore(query, b) : 0 }))
+    .map((b) => ({ b, s: query ? bookScore(query, b, field) : 0 }))
     .sort((x, y) =>
       (y.b.featured ? 1 : 0) - (x.b.featured ? 1 : 0) ||
       STATE_RANK[x.b.state] - STATE_RANK[y.b.state] ||
@@ -124,14 +125,14 @@ export function rank(books, query) {
  * Run a search. Calls onUpdate({books, pending, errors}) every time a source returns,
  * so the grid fills progressively.
  */
-export function runSearch({ text, category, featured, signal, onUpdate }) {
+export function runSearch({ text, category, featured, field = 'all', sort = 'relevance', signal, onUpdate }) {
   const alt = expandQuery(text);
   const results = {};
   const errors = {};
   const pending = new Set();
 
   const featuredHits = (featured || []).filter((b) =>
-    !text || bookScore(text, b) >= 0.6 || alt.some((a) => bookScore(a, b) >= 0.6));
+    !text || bookScore(text, b, field) >= 0.6 || alt.some((a) => bookScore(a, b, field) >= 0.6));
   results.featured = featuredHits;
 
   const emit = () => {
@@ -139,8 +140,12 @@ export function runSearch({ text, category, featured, signal, onUpdate }) {
     let merged = mergeResults([results.featured, results.ia, results.ol, results.google].filter(Boolean));
     if (category && category !== 'all') merged = merged.filter((b) => b.category === category);
     // drop remote junk that matches neither spelling (catalog APIs can be loose)
-    if (text) merged = merged.filter((b) => b.featured || b.source === 'ia' || bookScore(text, b) >= 0.35 || alt.some((a) => bookScore(a, b) >= 0.5));
-    onUpdate({ books: rank(merged, text), pending: [...pending], errors: { ...errors }, alt });
+    if (text) {
+      const min = field === 'author' ? 0.55 : 0.35; // author mode: the author must actually match
+      merged = merged.filter((b) => (b.featured && field !== 'author') || (b.source === 'ia' && field !== 'author') ||
+        bookScore(text, b, field) >= min || alt.some((a) => bookScore(a, b, field) >= 0.5));
+    }
+    onUpdate({ books: rank(merged, text, field), pending: [...pending], errors: { ...errors }, alt });
   };
 
   const run = (name, enabled, fn) => {
@@ -153,10 +158,27 @@ export function runSearch({ text, category, featured, signal, onUpdate }) {
   };
 
   const S = CONFIG.sources;
-  run('ia', S.internetArchive, () => searchIA({ text, altTexts: alt, category, signal }));
+  run('ia', S.internetArchive, () => searchIA({ text, altTexts: alt, category, field, sort, signal }));
   if (text) {
-    run('ol', S.openLibrary, () => searchOpenLibrary({ text, signal }));
-    run('google', S.googleBooks, () => searchGoogle({ text, signal }));
+    run('ol', S.openLibrary, () => searchOpenLibrary({ text, field, signal }));
+    run('google', S.googleBooks, () => searchGoogle({ text, field, signal }));
   }
   emit();
+}
+
+// ---------- sorting ----------
+export const SORTS = [
+  { id: 'relevance', label: 'Best match' },
+  { id: 'year-asc', label: 'Oldest first' },
+  { id: 'year-desc', label: 'Newest first' },
+];
+
+/** Stable sort by year; books with no known year always go last. */
+export function sortBooks(books, sort) {
+  if (sort !== 'year-asc' && sort !== 'year-desc') return books;
+  const dir = sort === 'year-asc' ? 1 : -1;
+  return books
+    .map((b, i) => ({ b, i, y: Number.isFinite(+b.year) && +b.year > 0 ? +b.year : null }))
+    .sort((x, y) => (x.y == null) - (y.y == null) || (x.y != null && y.y != null ? (x.y - y.y) * dir : 0) || x.i - y.i)
+    .map((x) => x.b);
 }

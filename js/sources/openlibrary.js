@@ -6,8 +6,9 @@ import { stripHtml } from './ia.js';
 
 const FIELDS = 'key,title,subtitle,author_name,first_publish_year,cover_i,ia,ebook_access,subject,language';
 
-export async function searchOpenLibrary({ text, signal }) {
-  const params = new URLSearchParams({ q: text, language: 'mal', limit: String(CONFIG.search.catalogRows), fields: FIELDS });
+export async function searchOpenLibrary({ text, field = 'all', signal }) {
+  const params = new URLSearchParams({ language: 'mal', limit: String(CONFIG.search.catalogRows), fields: FIELDS });
+  params.set(field === 'author' ? 'author' : 'q', text);
   const data = await getJSON(`https://openlibrary.org/search.json?${params}`, { ttl: CONFIG.search.cacheTtlMs, signal });
   return (data.docs || []).map(toBook).filter(Boolean);
 }

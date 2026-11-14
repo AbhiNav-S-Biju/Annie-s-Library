@@ -3,9 +3,9 @@ import { CONFIG } from '../config.js';
 import { getJSON } from '../net.js';
 import { guessCategory } from '../categories.js';
 
-export async function searchGoogle({ text, signal }) {
+export async function searchGoogle({ text, field = 'all', signal }) {
   const params = new URLSearchParams({
-    q: text,
+    q: field === 'author' ? `inauthor:"${text.replace(/"/g, '')}"` : text,
     langRestrict: 'ml',
     printType: 'books',
     maxResults: String(Math.min(40, CONFIG.search.catalogRows)),

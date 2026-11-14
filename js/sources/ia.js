@@ -25,11 +25,20 @@ function escapeTerm(s) {
 }
 
 /** Build a Lucene query: every word must hit title/creator/subject; long words get ~1 fuzziness. */
-function termClause(text) {
+function termClause(text, field = 'all') {
   const words = escapeTerm(text).split(' ').filter(Boolean).slice(0, 6);
   if (!words.length) return '';
   const fuzzy = (w) => (/^[a-z]+$/i.test(w) && w.length >= 5 ? `(${w} OR ${w}~1)` : w);
   const all = words.map(fuzzy).join(' AND ');
+  if (field === 'author') {
+    // Ignore initials ("O. Chandu Menon" -> chandu menon) and also try the run-together spelling
+    // IA uploaders often use ("Chandumenon", "Kumaranasan").
+    const names = words.filter((w) => w.replace(/\./g, '').length > 1).map((w) => w.replace(/\./g, ''));
+    if (!names.length) return `creator:(${all})`;
+    const parts = [`creator:(${names.map(fuzzy).join(' AND ')})`];
+    if (names.length > 1) parts.push(`creator:(${names.join('')})`);
+    return parts.length > 1 ? `(${parts.join(' OR ')})` : parts[0];
+  }
   return `(title:(${all}) OR creator:(${all}) OR subject:(${all}))`;
 }
 
@@ -37,16 +46,25 @@ function termClause(text) {
  * @param {{text?: string, altTexts?: string[], category?: string, rows?: number, signal?: AbortSignal}} opts
  * altTexts: extra spellings (e.g. Manglish transliterated to Malayalam) OR-ed with the text.
  */
-export async function searchIA({ text = '', altTexts = [], category = 'all', rows = CONFIG.search.iaRows, signal } = {}) {
-  const clauses = [text, ...altTexts].map(termClause).filter(Boolean);
-  const parts = [LANG, 'mediatype:texts', OPEN];
+export async function searchIA({ text = '', altTexts = [], category = 'all', field = 'all', sort = 'relevance', rows = CONFIG.search.iaRows, signal } = {}) {
+  const clauses = [text, ...altTexts].map((t) => termClause(t, field)).filter(Boolean);
+  const parts = [LANG, 'mediatype:texts', OPEN, ...(CONFIG.iaExclude || [])];
   if (clauses.length) parts.unshift(clauses.length > 1 ? `(${clauses.join(' OR ')})` : clauses[0]);
   if (category && CATEGORY_QUERY[category]) parts.push(CATEGORY_QUERY[category]);
   const q = parts.join(' AND ');
 
   const params = new URLSearchParams({ q, rows: String(rows), page: '1', output: 'json' });
   FIELDS.forEach((f) => params.append('fl[]', f));
-  params.append('sort[]', 'downloads desc');
+  // Year sorts are done server-side so you get e.g. the oldest matches overall, not just the
+  // oldest of the 36 most-downloaded. IA puts undated items last.
+  if (sort === 'year-asc' || sort === 'year-desc') {
+    // Some uploaders enter Kollam-era (ME) or Hijri years (e.g. 1103, 1417), which would swamp
+    // "oldest first". Keep plausible Gregorian years plus undated items.
+    params.set('q', `${q} AND (year:[1700 TO 2100] OR (*:* -year:[* TO *]))`);
+    params.append('sort[]', `year ${sort === 'year-asc' ? 'asc' : 'desc'}`);
+  } else {
+    params.append('sort[]', 'downloads desc');
+  }
   const url = `${BASE}/advancedsearch.php?${params}`;
 
   const data = await getJSON(url, { ttl: CONFIG.search.cacheTtlMs, signal });
@@ -88,7 +106,8 @@ export function docToBook(d) {
 
 function cleanTitle(t) { return String(t).replace(/_/g, ' ').replace(/\s+/g, ' ').trim(); }
 function cleanAuthor(a) { return String(a).replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim(); }
-function yearOf(v) { const m = String(first(v) || '').match(/\d{4}/); return m ? +m[0] : null; }
+// Years before 1700 are almost always Kollam-era or Hijri dates typed as Gregorian; treat as unknown.
+function yearOf(v) { const m = String(first(v) || '').match(/\d{4}/); const y = m ? +m[0] : null; return y && y >= 1700 && y <= 2100 ? y : null; }
 export function stripHtml(s) {
   try {
     const d = new DOMParser().parseFromString(String(s), 'text/html');

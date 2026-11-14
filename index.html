@@ -37,6 +37,13 @@
                placeholder="തിരയുക… or type in Manglish (e.g. indulekha)" enterkeyhint="search">
         <button type="button" class="icon-btn clear" id="clear-q" aria-label="Clear search" hidden></button>
       </form>
+      <div class="toolbar">
+        <div class="seg" id="scope" role="group" aria-label="Search in">
+          <button type="button" data-field="all" aria-pressed="true">Title &amp; author</button>
+          <button type="button" data-field="author" aria-pressed="false">Author</button>
+        </div>
+        <label class="sort"><span data-icon="sort"></span><span class="sr-only">Sort by</span><select id="sort"></select></label>
+      </div>
       <p class="translit-hint" id="translit-hint" hidden></p>
       <div class="chips" id="chips" role="toolbar" aria-label="Categories"></div>
     </div>

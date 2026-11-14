@@ -30,6 +30,15 @@ export const CONFIG = {
   blockedArchiveIds: [
     'AadujeevithamByBenyamin',
   ],
+  // Lucene clauses AND-ed onto every Internet Archive query to keep non-book material out.
+  // Without these, ~96% of IA's "Malayalam texts" are Kerala Gazette issues and Legislative Assembly
+  // proceedings (about 213,000 of 221,000), which bury the books, especially when sorting by year.
+  iaExclude: [
+    '-collection:(gazetteofindia)',
+    '-identifier:keralalegislativeassembly*',
+    '-title:(bulletin OR "SDOF Sunday")', // weekly church newsletters
+  ],
+
   // IA items whose creator contains one of these (case-insensitive) are treated as catalog-only (BUY),
   // because these authors' works are still in copyright in India (life + 60 years).
   inCopyrightAuthors: [

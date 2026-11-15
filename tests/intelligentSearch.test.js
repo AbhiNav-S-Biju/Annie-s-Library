@@ -8,12 +8,15 @@ beforeEach(() => { resultCache.clear(); resetCooldowns(); });
 
 /** Fake sources: each returns the fixture books its name says, after a short delay. */
 function fakeSources(over = {}) {
-  const calls = { ia: [], ol: [], google: [] };
+  const calls = { ia: [], ol: [], google: [], libgen: [], randombook: [], annas: [] };
   const later = (v, ms = 5) => new Promise((r) => setTimeout(() => r(v), ms));
   const s = {
     ia: (o) => { calls.ia.push(o); return later(CORPUS.filter((b) => b.source === 'ia')); },
     ol: (o) => { calls.ol.push(o); return later(CORPUS.filter((b) => b.source === 'openlibrary')); },
     google: (o) => { calls.google.push(o); return later(CORPUS.filter((b) => b.source === 'google')); },
+    libgen: (o) => { calls.libgen.push(o); return later([]); },
+    randombook: (o) => { calls.randombook.push(o); return later([]); },
+    annas: (o) => { calls.annas.push(o); return later([]); },
     ...over,
   };
   return { s, calls };
@@ -42,9 +45,9 @@ test('one failing source does not block the others; error is reported', async ()
 
 test('all sources failing -> no books, all errors, no crash', async () => {
   const fail = () => Promise.reject(new Error('down'));
-  const { last } = await search('chemmeen', { sources: { ia: fail, ol: fail, google: fail } });
+  const { last } = await search('chemmeen', { sources: { ia: fail, ol: fail, google: fail, libgen: fail, randombook: fail, annas: fail } });
   assert.equal(last.books.length, 0);
-  assert.deepEqual(Object.keys(last.errors).sort(), ['google', 'ia', 'ol']);
+  assert.deepEqual(Object.keys(last.errors).sort(), ['annas', 'google', 'ia', 'libgen', 'ol', 'randombook']);
 });
 
 test('results arrive progressively (an update per source)', async () => {
@@ -131,6 +134,9 @@ test('author search: exact author matches exclude similar-looking names', async 
     ia: async () => [book({ key: 'ia:bb', archiveId: 'bb', title: 'Cheru Paithangal', author: 'Benjamin Bailey' })],
     ol: async () => [book({ key: 'ol:b1', source: 'openlibrary', title: 'Aatujeevitham', author: 'Benyāmin', state: 'BUY' })],
     google: async () => [],
+    libgen: async () => [],
+    randombook: async () => [],
+    annas: async () => [],
   };
   const { last } = await search('Benyamin', { sources, field: 'author' });
   assert.deepEqual(last.books.map((b) => b.key), ['ol:b1']);

@@ -6,6 +6,9 @@ import { CONFIG } from '../config.js';
 import { searchIA } from '../sources/ia.js';
 import { searchGoogle } from '../sources/google.js';
 import { searchOpenLibrary } from '../sources/openlibrary.js';
+import { searchLibgen } from '../sources/libgen.js';
+import { searchRandomBook } from '../sources/randombook.js';
+import { searchAnnasArchive } from '../sources/annasarchive.js';
 import { isAbort } from '../net.js';
 import { normaliseQuery, hasMalayalam } from './normaliseQuery.js';
 import { mlToLibraryRoman } from './transliteration.js';
@@ -39,6 +42,9 @@ export const DEFAULT_SOURCES = {
   ia: (o) => searchIA(o),
   ol: (o) => searchOpenLibrary(o),
   google: (o) => searchGoogle(o),
+  libgen: (o) => searchLibgen(o),
+  randombook: (o) => searchRandomBook(o),
+  annas: (o) => searchAnnasArchive(o),
 };
 
 /** source -> timestamp until which it is skipped (after HTTP 429). */
@@ -91,7 +97,14 @@ export async function intelligentSearch({ text, field = 'all', category = 'all',
   await loadFuse();
   if (signal?.aborted) return;
   const q = normaliseQuery(text);
-  const enabled = { ia: CONFIG.sources.internetArchive, ol: CONFIG.sources.openLibrary, google: CONFIG.sources.googleBooks };
+  const enabled = {
+    ia: CONFIG.sources.internetArchive,
+    ol: CONFIG.sources.openLibrary,
+    google: CONFIG.sources.googleBooks,
+    libgen: CONFIG.sources.libgen,
+    randombook: CONFIG.sources.randomBook,
+    annas: CONFIG.sources.annasArchive,
+  };
 
   /** @type {Record<string, Book[]>} */
   const results = {};
@@ -104,7 +117,7 @@ export async function intelligentSearch({ text, field = 'all', category = 'all',
     results.featured = featured;
     const emitBrowse = () => {
       if (signal?.aborted) return;
-      let merged = mergeResults([results.featured, results.ia]);
+      let merged = mergeResults([results.featured, results.ia, results.libgen, results.randombook, results.annas]);
       if (category !== 'all') merged = merged.filter((b) => b.category === category);
       onUpdate({ query: q, books: rankBooks(merged), scores: new Map(), pending: [...pending], errors: { ...errors }, variants: [], alt: [], didYouMean: null, similarOnly: false });
     };
@@ -132,7 +145,7 @@ export async function intelligentSearch({ text, field = 'all', category = 'all',
 
   const emit = () => {
     if (signal?.aborted) return;
-    let merged = mergeResults([results.featured, results.ia, results.ol, results.google]);
+    let merged = mergeResults([results.featured, results.ia, results.ol, results.google, results.libgen, results.randombook, results.annas]);
     if (category !== 'all') merged = merged.filter((b) => b.category === category);
     const scores = scoreBooks(merged, variants, { field });
     let kept = merged.filter((b) => (scores.get(b.key)?.score ?? 0) >= CONFIG.search.minRelevance);
@@ -184,5 +197,8 @@ export async function intelligentSearch({ text, field = 'all', category = 'all',
   run('ia', () => sources.ia({ text: plan.ia.text, altTexts: plan.ia.altTexts, infix: plan.ia.infix, prefix: true, category, field, sort, signal }));
   run('ol', () => many(plan.ol, (t) => sources.ol({ text: t, field, signal })));
   run('google', () => many(plan.google, (t) => sources.google({ text: t, field, signal })));
+  run('libgen', () => sources.libgen({ text: q.normalised, field, signal }));
+  run('randombook', () => sources.randombook({ text: q.normalised, field, signal }));
+  run('annas', () => sources.annas({ text: q.normalised, field, signal }));
   emit();
 }

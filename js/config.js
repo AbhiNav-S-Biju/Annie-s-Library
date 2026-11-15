@@ -23,7 +23,7 @@ export const CONFIG = {
   googleBooksApiKey: '',
 
   // Turn individual sources off without touching code.
-  sources: { internetArchive: true, googleBooks: true, openLibrary: true },
+  sources: { internetArchive: true, googleBooks: true, openLibrary: true, libgen: true, randomBook: true, annasArchive: true },
 
   // Internet Archive items that must never be offered for reading (e.g. unauthorised uploads of
   // in-copyright books). Add identifiers as you find them; use the in-app "Report" link to collect them.

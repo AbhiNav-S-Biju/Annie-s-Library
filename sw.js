@@ -1,6 +1,6 @@
 // Service worker: app shell offline, libraries/fonts cached, covers cached (capped).
 // Bump VERSION whenever you change files in SHELL so phones pick up the new build.
-const VERSION = 'v7';
+const VERSION = 'v8';
 const SHELL_CACHE = `shell-${VERSION}`;
 const LIB_CACHE = 'libs-v1';
 const COVER_CACHE = 'covers-v1';

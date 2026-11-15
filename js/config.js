@@ -57,7 +57,9 @@ export const CONFIG = {
     repo: 'AbhiNav-S-Biju/Annie-s-Library', // "owner/repo" of this site
     branch: 'main',
     dir: 'public-books',
-    maxMb: 100, // GitHub rejects any file over 100 MB, so this is the ceiling. Large uploads need a good connection.
+    // Measured against GitHub's API (Nov 2026): a 40 MB file is accepted, 45 MB and up is refused
+    // ("input was too large to process"). Bigger files can only be added with git from a computer.
+    maxMb: 40,
   },
 
   // Where "Report bad scan" goes. If githubRepo is set ("owner/repo"), a prefilled GitHub issue opens;

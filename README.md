@@ -98,9 +98,16 @@ Things to know:
 - **Public means public.** The site and the repository are open to anyone on the internet, so only
   publish books you wrote or that are free to share (public domain or openly licensed). The form asks
   you to confirm this.
-- Public PDFs can be up to 100 MB (`CONFIG.publicBooks.maxMb`), which is GitHub's own per-file
-  ceiling. Very large uploads need a steady connection and may fail on older phones. GitHub asks repositories to stay
-  under about 1 GB in total, so this suits a small shared collection, not a large one.
+- Public PDFs can be up to **40 MB** when added from the app (`CONFIG.publicBooks.maxMb`). That is
+  GitHub's real limit for uploads through its API: in testing, 40 MB was accepted and 45 MB and up
+  was refused as "too large to process". Compressing a scanned PDF usually gets it under.
+- Bigger files (up to GitHub's 100 MB git limit) can be added from a computer with git: put the PDF
+  in `public-books/`, add an entry like
+  `{ "id": "my-book", "title": "…", "author": "…", "category": "novels", "year": 1930, "file": "my-book.pdf", "cover": null, "size": 0, "added": 0 }`
+  to `public-books/index.json`, commit and push.
+- Publishing is one commit (PDF, cover and list together), so a failed upload leaves nothing behind.
+  GitHub asks repositories to stay under about 1 GB in total, so this suits a small shared
+  collection, not a large one.
 - To remove a public book, open it on a device that has the token and choose **Remove for everyone**.
   You can also delete its files and its entry in `public-books/index.json` on GitHub.
 - Settings are in `CONFIG.publicBooks` in `js/config.js` (repo, branch, folder, size limit).

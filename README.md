@@ -87,8 +87,18 @@ network-first, so users get updates on the next load anyway. The version bump re
 index.html, css/app.css
 js/app.js           UI: library, search, detail sheet, shelf, theme
 js/reader.js        full-screen reader (StPageFlip curl, or instant turns), zoom, gestures, resume
-js/search.js        parallel search, merge/de-dupe, ranking (featured > Read > Preview > Buy)
-js/translit.js      Manglish → Malayalam (rules + lexicon), phonetic keys for fuzzy matching
+js/search/          the search engine (no UI code):
+  intelligentSearch.js  orchestration: sources in parallel, abort, caching, rate-limit cooldown
+  normaliseQuery.js     case/space/punctuation + safe Malayalam Unicode normalisation
+  transliteration.js    Manglish → Malayalam candidates, phonetic keys, library romanisation
+  lexicon.js            word list + dictionary of known titles/authors (suggestions only)
+  queryExpansion.js     generateSearchVariants(), "did you mean"
+  fuzzyMatcher.js       Fuse.js wrapper (+ built-in fallback)
+  relevanceScorer.js    match tiers → relevance score
+  mergeResults.js       de-duplication across sources, ranking, year sort
+  searchCache.js        result cache + recently seen books
+  suggestions.js        suggestions while typing (local, no network)
+  searchTypes.js        JSDoc types: SearchQuery, SearchVariant, SearchResult, SearchSuggestion…
 js/sources/*.js     Internet Archive, Google Books, Open Library
 js/pdf.js           PDF.js rendering + IndexedDB storage for your own PDFs
 js/storage.js       localStorage wrappers (all in try/catch), API response cache
@@ -104,6 +114,44 @@ sw.js               offline app shell, cached libraries/fonts/covers
 - **Single page** in portrait, **two-page spread** in landscape (width > 1.1 × height and ≥ 560px).
 - The page-turn animation follows `prefers-reduced-motion` until you change the switch in the reader menu.
 
+## Search
+
+Type a title, an author, part of a title, a misspelling, or Manglish; any of these works:
+
+| You type | You get |
+| --- | --- |
+| `ആടുജീവിതം` | exact title match |
+| `aadujeevitham`, `aadu jeevitham` | Manglish → ആടുജീവിതം |
+| `aadjeevitham` | "Did you mean ആടുജീവിതം (Aadujeevitham — Benyamin)?" |
+| `randamoozham`, `randamuzham` | രണ്ടാമൂഴം; Open Library is also asked for "rantamulam", which is how it catalogues *Raṇṭāmūḻaṃ* |
+| `aadu`, `ജീവി` | partial matches (prefix search on IA; mid-word for single Malayalam words) |
+| `Benyamin` (Author) | his books only, not Benjamin Bailey |
+
+How it works:
+1. **Normalise:** lowercase, collapse spaces, drop punctuation. Malayalam text is put into NFC and old encodings are unified (ന്‍ → ൻ, ൻറ → ന്റ, ൌ → ൗ), without touching conjuncts.
+2. **Expand** (`generateSearchVariants`): the original, normalised and space-less forms, Manglish transliteration candidates, dictionary matches, and the older chillu encoding some catalogues use. At most 8 variants, deduplicated.
+3. **Query sources concurrently:** one Internet Archive request (variants OR-ed), up to two Open Library requests, one Google Books request, whatever the number of variants. The search is debounced 350 ms, outdated requests are aborted, and after HTTP 429 a source is skipped for 10 minutes. API responses are cached for 24 h and ranked results for 10 minutes.
+4. **Score:** exact title > normalised title > alternate title > transliteration > fuzzy title (Fuse.js) > exact author > partial title > fuzzy author > category > description. Weights and thresholds are in `CONFIG.search`.
+5. **Merge and rank:** the same book from different sources becomes one card only if titles *and* authors agree. Then featured > Read > Preview > Buy, by relevance within each group.
+
+Suggestions while typing are computed locally (no API calls): "Did you mean", the Malayalam spelling, known titles that start with what you typed, real books already loaded, and authors. Guesses with low confidence are not shown.
+
+To improve Manglish for more books, add entries to `js/search/lexicon.js` (correct Malayalam + one English spelling).
+
+### Tests
+
+```bash
+npm install
+```
+
+```bash
+npm test
+```
+
+Offline unit tests cover normalisation, transliteration, expansion, ranking, de-duplication, failure handling, caching and abort. `LIVE=1 npm run test:live` runs the spec queries against the real APIs.
+
+Fuse.js 7.1.0 comes from jsDelivr through the import map in `index.html` (and from npm in tests). `package.json` exists only for the tests; the site still has no build step.
+
 ## Limits and known issues
 
 - **Google Books:** the keyless quota was exhausted (HTTP 429, limit 0) every time this was tested.
@@ -117,7 +165,14 @@ sw.js               offline app shell, cached libraries/fonts/covers
   "Report bad scan or copyright problem" to collect more IDs.
 - **Manglish → Malayalam** is a best guess (vowel length and ṭ/t, ḷ/l are ambiguous in Manglish). The
   app always searches the original text as well, and fuzzy matching handles spelling variants.
-  Common literary words and names are in the lexicon in `js/translit.js`; add more there.
+  Common literary words and names are in the lexicon in `js/search/lexicon.js`; add more there.
+  On its own, the rule engine gets common words right (ചെമ്മീൻ first; ആടുജീവിതം second) but can't recover
+  vowel length the user didn't type (randamoozham → രണ്ടമൂഴം); the dictionary and the phonetic fuzzy
+  matcher cover those. Samvruthokaram (final ്) yields both …ു and …് candidates.
+- **Open Library** romanises Malayalam (ALA-LC), so Manglish spellings only match there via the
+  generated romanisation, which is approximate (it found *Raṇṭāmūḻaṃ* and *Cemmīn*, but not every title).
+- Mid-word Malayalam search on Internet Archive uses a leading wildcard, which takes 2–3 s, so it is
+  only used for single-word Malayalam queries.
 - **DC Books** search links use `dcbookstore.com/search?q=`. That page renders client-side, so the
   results couldn't be checked automatically.
 - **iPhone:** Safari has no element fullscreen, so the reader uses a fixed 100dvh overlay. "Add to Home Screen" gives the full-screen app.

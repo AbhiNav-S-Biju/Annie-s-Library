@@ -24,11 +24,19 @@ function escapeTerm(s) {
   return s.replace(/[+\-&|!(){}\[\]^"~*?:\\/]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-/** Build a Lucene query: every word must hit title/creator/subject; long words get ~1 fuzziness. */
-function termClause(text, field = 'all') {
+/**
+ * Build a Lucene query: every word must hit title/creator/subject; long Latin words get ~1 fuzziness;
+ * with `prefix`, the last word also matches as a prefix (partial typing: "aadu" -> Aadujeevitham).
+ */
+function termClause(text, field = 'all', { prefix = false } = {}) {
   const words = escapeTerm(text).split(' ').filter(Boolean).slice(0, 6);
   if (!words.length) return '';
-  const fuzzy = (w) => (/^[a-z]+$/i.test(w) && w.length >= 5 ? `(${w} OR ${w}~1)` : w);
+  const fuzzy = (w, i) => {
+    const alts = [w];
+    if (/^[a-z]+$/i.test(w) && w.length >= 5) alts.push(`${w}~1`);
+    if (prefix && i === words.length - 1 && [...w].length >= 3 && !w.endsWith('\u0D4D')) alts.push(`${w}*`);
+    return alts.length > 1 ? `(${alts.join(' OR ')})` : w;
+  };
   const all = words.map(fuzzy).join(' AND ');
   if (field === 'author') {
     // Ignore initials ("O. Chandu Menon" -> chandu menon) and also try the run-together spelling
@@ -46,8 +54,12 @@ function termClause(text, field = 'all') {
  * @param {{text?: string, altTexts?: string[], category?: string, rows?: number, signal?: AbortSignal}} opts
  * altTexts: extra spellings (e.g. Manglish transliterated to Malayalam) OR-ed with the text.
  */
-export async function searchIA({ text = '', altTexts = [], category = 'all', field = 'all', sort = 'relevance', rows = CONFIG.search.iaRows, signal } = {}) {
-  const clauses = [text, ...altTexts].map((t) => termClause(t, field)).filter(Boolean);
+export async function searchIA({ text = '', altTexts = [], category = 'all', field = 'all', sort = 'relevance', rows = CONFIG.search.iaRows, prefix = false, infix = false, signal } = {}) {
+  const clauses = [...new Set([text, ...altTexts])].map((t) => termClause(t, field, { prefix })).filter(Boolean);
+  // A single Malayalam word inside a compound title (ജീവി in ആടുജീവിതം). Leading wildcards are
+  // slow on IA (2-3 s), so the caller only asks for this when it's likely to help.
+  const word = escapeTerm(text);
+  if (infix && word && !word.includes(' ') && field !== 'author') clauses.push(`title:(*${word}*)`);
   const parts = [LANG, 'mediatype:texts', OPEN, ...(CONFIG.iaExclude || [])];
   if (clauses.length) parts.unshift(clauses.length > 1 ? `(${clauses.join(' OR ')})` : clauses[0]);
   if (category && CATEGORY_QUERY[category]) parts.push(CATEGORY_QUERY[category]);

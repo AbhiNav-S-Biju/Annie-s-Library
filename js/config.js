@@ -71,6 +71,37 @@ export const CONFIG = {
     catalogRows: 20,
     cacheTtlMs: 24 * 60 * 60 * 1000,      // search responses
     metaCacheTtlMs: 7 * 24 * 60 * 60 * 1000, // item metadata
+    resultCacheTtlMs: 10 * 60 * 1000,        // merged+ranked results per query (memory)
+    rateLimitCooldownMs: 10 * 60 * 1000,     // skip a source this long after HTTP 429
+
+    // Query expansion
+    maxVariants: 8,              // spellings tried per search (deduplicated)
+    maxIaClauses: 5,             // of those, how many go into the single Internet Archive query
+    minTranslitConfidence: 0.35,  // rule-only transliterations below this are not sent to APIs
+
+    // Fuzzy matching (Fuse.js scores: 0 = perfect, 1 = unrelated)
+    fuzzy: {
+      threshold: 0.35,           // Fuse threshold for title/author matching
+      correctionMax: 0.25,       // "Did you mean": max normalised edit distance on the phonetic key
+      suggestionMax: 0.3,        // book/author suggestions while typing
+    },
+
+    // Relevance scores per match type (higher ranks first within an availability group).
+    weights: {
+      exactTitle: 100,
+      normalisedTitle: 92,
+      exactAltTitle: 86,
+      transliteration: 80,
+      fuzzyTitle: 72,            // scaled down by how fuzzy the match is
+      exactAuthor: 62,
+      partialTitle: 55,
+      fuzzyAuthor: 34,
+      category: 24,
+      description: 20,
+    },
+    minRelevance: 18,            // results scoring below this are dropped as too broad
+    relativeCutoff: 0.55,        // with a strong match present, drop results below this fraction of the best score
+    strongMatch: 55,             // below this the UI says "No exact match found. Showing similar books."
   },
 
   categories: [

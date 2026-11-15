@@ -1,0 +1,13 @@
+{
+  "name": "annies-library",
+  "private": true,
+  "description": "Static PWA for finding and reading Malayalam books. No build step; package.json exists only for tests.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:live": "node --test tests/live.test.js"
+  },
+  "devDependencies": {
+    "fuse.js": "7.1.0"
+  }
+}

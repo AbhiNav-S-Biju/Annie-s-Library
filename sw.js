@@ -1,6 +1,6 @@
 // Service worker: app shell offline, libraries/fonts cached, covers cached (capped).
 // Bump VERSION whenever you change files in SHELL so phones pick up the new build.
-const VERSION = 'v4';
+const VERSION = 'v5';
 const SHELL_CACHE = `shell-${VERSION}`;
 const LIB_CACHE = 'libs-v1';
 const COVER_CACHE = 'covers-v1';
@@ -23,8 +23,17 @@ const SHELL = [
   'js/overlay.js',
   'js/reader.js',
   'js/vendor.js',
-  'js/search.js',
-  'js/translit.js',
+  'js/search/searchTypes.js',
+  'js/search/normaliseQuery.js',
+  'js/search/lexicon.js',
+  'js/search/transliteration.js',
+  'js/search/fuzzyMatcher.js',
+  'js/search/queryExpansion.js',
+  'js/search/relevanceScorer.js',
+  'js/search/mergeResults.js',
+  'js/search/searchCache.js',
+  'js/search/suggestions.js',
+  'js/search/intelligentSearch.js',
   'js/categories.js',
   'js/pdf.js',
   'js/sources/ia.js',

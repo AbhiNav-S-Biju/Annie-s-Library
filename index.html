@@ -18,6 +18,8 @@
   <link rel="preconnect" href="https://archive.org">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manjari:wght@400;700&family=Noto+Sans+Malayalam:wght@400;600;700&display=swap">
   <link rel="stylesheet" href="css/app.css">
+  <!-- Bare import "fuse.js" -> pinned CDN build (Node tests resolve the same name from npm). -->
+  <script type="importmap">{ "imports": { "fuse.js": "https://cdn.jsdelivr.net/npm/fuse.js@7.1.0/dist/fuse.mjs" } }</script>
   <script>
     // Apply saved theme before first paint (no flash).
     try { var s = JSON.parse(localStorage.getItem('mlib:settings') || '{}'); if (s.theme === 'light' || s.theme === 'dark') document.documentElement.dataset.theme = s.theme; } catch (e) {}
@@ -34,8 +36,10 @@
         <span data-icon="search"></span>
         <label for="q" class="sr-only">Search Malayalam books</label>
         <input id="q" type="search" inputmode="search" autocomplete="off" autocapitalize="off" spellcheck="false"
+               role="combobox" aria-autocomplete="list" aria-controls="suggest" aria-expanded="false"
                placeholder="തിരയുക… or type in Manglish (e.g. indulekha)" enterkeyhint="search">
         <button type="button" class="icon-btn clear" id="clear-q" aria-label="Clear search" hidden></button>
+        <ul class="suggest" id="suggest" role="listbox" aria-label="Suggestions" hidden></ul>
       </form>
       <div class="toolbar">
         <div class="seg" id="scope" role="group" aria-label="Search in">

@@ -1,13 +1,17 @@
 import { CONFIG } from './config.js';
 import * as store from './storage.js';
 import { icons } from './icons.js';
-import { runSearch, sortBooks, SORTS } from './search.js';
+import { intelligentSearch } from './search/intelligentSearch.js';
+import { sortBooks, SORTS } from './search/mergeResults.js';
+import { getSuggestions } from './search/suggestions.js';
+import { normaliseText } from './search/normaliseQuery.js';
+import { loadFuse } from './search/fuzzyMatcher.js';
 import { getBookManifest, getItemMeta } from './sources/ia.js';
 import { getOpenLibraryDescription } from './sources/openlibrary.js';
 import { openReader, escapeHtml } from './reader.js';
 import { pushOverlay } from './overlay.js';
 import { loadPageFlip } from './vendor.js';
-import { manglishToMalayalam } from './translit.js';
+import { manglishToMalayalam } from './search/transliteration.js';
 import { HttpError } from './net.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -23,8 +27,10 @@ const state = {
   pending: [],
   errors: {},
   alt: [],
+  didYouMean: null,  // {entry} from the dictionary, when the query looks misspelled
+  similarOnly: false, // no strong match: show "No exact match found. Showing similar books."
   field: 'all',      // 'all' | 'author'
-  sort: 'relevance', // see SORTS in search.js
+  sort: 'relevance', // see SORTS in search/mergeResults.js
   searchCtrl: null,
 };
 
@@ -42,6 +48,7 @@ async function init() {
   await loadFeatured();
   search();
   registerSw();
+  loadFuse(); // fuzzy matcher for suggestions (built-in fallback is used until/unless it loads)
   // warm the page-flip library while the user browses
   (window.requestIdleCallback || setTimeout)(() => { if (store.getSettings().flip !== false) loadPageFlip().catch(() => {}); });
 }
@@ -96,13 +103,41 @@ function bindUi() {
   let t;
   q.addEventListener('input', () => {
     $('#clear-q').hidden = !q.value;
+    renderSuggestions(q.value); // local only: no network per keystroke
     clearTimeout(t);
     t = setTimeout(() => setQuery(q.value), CONFIG.search.debounceMs);
   });
   q.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { clearTimeout(t); setQuery(q.value); q.blur(); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { moveSuggestion(e.key === 'ArrowDown' ? 1 : -1); e.preventDefault(); return; }
+    if (e.key === 'Escape') { hideSuggestions(); return; }
+    if (e.key === 'Enter') {
+      const active = $('#suggest [aria-selected="true"]');
+      clearTimeout(t);
+      if (active) { active.click(); e.preventDefault(); return; }
+      hideSuggestions();
+      setQuery(q.value);
+      q.blur();
+    }
   });
-  $('#clear-q').addEventListener('click', () => { q.value = ''; $('#clear-q').hidden = true; setQuery(''); q.focus(); });
+  q.addEventListener('focus', () => { if (q.value.trim()) renderSuggestions(q.value); });
+  q.addEventListener('blur', () => setTimeout(hideSuggestions, 180)); // let a tap on a suggestion land first
+  $('#suggest').addEventListener('pointerdown', (e) => e.preventDefault()); // keep focus in the input while tapping
+  $('#suggest').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-sugg]');
+    if (!b) return;
+    const s = suggestionsShown[+b.dataset.sugg];
+    hideSuggestions();
+    if (!s) return;
+    if (s.type === 'book' && s.book) { q.blur(); openSheet(s.book); return; }
+    if (s.field && s.field !== state.field) { state.field = s.field; renderScope(); }
+    q.value = s.value || s.label;
+    $('#clear-q').hidden = false;
+    clearTimeout(t);
+    state.query = '';
+    setQuery(q.value);
+    q.blur();
+  });
+  $('#clear-q').addEventListener('click', () => { q.value = ''; $('#clear-q').hidden = true; hideSuggestions(); setQuery(''); q.focus(); });
 
   document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => {
     if (b.dataset.action === 'add-pdf') { $('#pdf-input').click(); return; }
@@ -121,7 +156,7 @@ function bindUi() {
     if (act.dataset.act === 'clear') { q.value = ''; $('#clear-q').hidden = true; setQuery(''); }
     if (act.dataset.act === 'all') setCategory('all');
     if (act.dataset.act === 'library') setTab('library');
-    if (act.dataset.act === 'use-ml') { q.value = act.dataset.text; setQuery(q.value); }
+    if (act.dataset.act === 'use-ml') { q.value = act.dataset.text; $('#clear-q').hidden = false; setQuery(q.value); }
   });
   $('#translit-hint').addEventListener('click', (e) => {
     const b = e.target.closest('[data-text]');
@@ -166,7 +201,7 @@ function settleCovers(root) {
 // ---------------- library / search ----------------
 function setQuery(v) {
   const nv = v.trim();
-  if (nv === state.query) return;
+  if (normaliseText(nv) === normaliseText(state.query) && (nv === '') === (state.query === '')) { state.query = nv; return; }
   state.query = nv;
   if (state.tab !== 'library') setTab('library');
   search();
@@ -186,28 +221,73 @@ function search() {
   state.errors = {};
   state.pending = ['init'];
   renderLibrary();
-  runSearch({
+  intelligentSearch({
     text: state.query,
     category: state.category,
     featured: state.featured,
     field: state.field,
     sort: state.sort,
     signal: ctrl.signal,
-    onUpdate: ({ books, pending, errors, alt }) => {
+    onUpdate: ({ books, pending, errors, alt, didYouMean, similarOnly }) => {
       if (ctrl.signal.aborted) return;
       state.books = books;
       state.pending = pending;
       state.errors = errors;
       state.alt = alt;
+      state.didYouMean = didYouMean;
+      state.similarOnly = similarOnly;
       renderLibrary();
+      if (document.activeElement === $('#q')) renderSuggestions($('#q').value); // real books can now be suggested
     },
-  });
+  }).catch(() => { state.pending = []; state.errors = { ia: { message: 'search failed' } }; renderLibrary(); });
 }
 
 function renderChips() {
   $('#chips').innerHTML = CONFIG.categories.map((c) =>
     `<button class="chip" data-cat="${c.id}" aria-pressed="${state.category === c.id}">${esc(c.label)} <small lang="ml">${esc(c.ml)}</small></button>`).join('');
   $('#chips').querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => setCategory(b.dataset.cat)));
+}
+
+// ---------------- suggestions (while typing) ----------------
+let suggestionsShown = [];
+const SUGG_LABEL = { correction: 'Did you mean', transliteration: 'In Malayalam', title: 'Title', book: 'Book', author: 'Author' };
+
+function renderSuggestions(text) {
+  const box = $('#suggest');
+  const list = state.tab === 'library'
+    ? getSuggestions(text, { field: state.field, featured: state.featured, books: state.books })
+    : [];
+  suggestionsShown = list;
+  if (!list.length) { hideSuggestions(); return; }
+  let lastType = '';
+  box.innerHTML = list.map((s, i) => {
+    const head = s.type !== lastType ? `<li class="sugg-h" role="presentation">${esc(SUGG_LABEL[s.type])}</li>` : '';
+    lastType = s.type;
+    const icon = s.type === 'book' ? icons.book : s.type === 'author' ? icons.person : icons.search;
+    return `${head}<li role="presentation"><button type="button" class="sugg" role="option" id="sugg-${i}" data-sugg="${i}" aria-selected="false">
+      <span class="sugg-i">${icon}</span><span class="sugg-t"><span class="sugg-l">${esc(s.label)}</span>${s.sublabel ? `<span class="sugg-s">${esc(s.sublabel)}</span>` : ''}</span></button></li>`;
+  }).join('');
+  box.hidden = false;
+  $('#q').setAttribute('aria-expanded', 'true');
+}
+
+function hideSuggestions() {
+  const box = $('#suggest');
+  box.hidden = true;
+  box.innerHTML = '';
+  suggestionsShown = [];
+  $('#q').setAttribute('aria-expanded', 'false');
+  $('#q').removeAttribute('aria-activedescendant');
+}
+
+function moveSuggestion(dir) {
+  const opts = [...document.querySelectorAll('#suggest .sugg')];
+  if (!opts.length) return;
+  const cur = opts.findIndex((o) => o.getAttribute('aria-selected') === 'true');
+  const next = (cur + dir + opts.length + (cur < 0 && dir < 0 ? 1 : 0)) % opts.length;
+  opts.forEach((o, i) => o.setAttribute('aria-selected', String(i === next)));
+  $('#q').setAttribute('aria-activedescendant', opts[next].id);
+  opts[next].scrollIntoView({ block: 'nearest' });
 }
 
 function initToolbar() {
@@ -302,7 +382,7 @@ function renderLibrary() {
         : noResultsState(),
       raw: true,
     });
-    html += sourceNotices();
+    html = searchNotices() + html + sourceNotices();
   }
   main.innerHTML = html;
   settleCovers(main);
@@ -389,10 +469,24 @@ function noResultsState() {
     ${state.category !== 'all' ? '<div class="row"><button class="btn small ghost" data-act="all">Search all categories</button></div>' : ''}</div>`;
 }
 
+function searchNotices() {
+  if (state.pending.length && !state.books.length) return '';
+  const parts = [];
+  const dym = state.didYouMean?.entry;
+  if (dym && normaliseText(dym.ml) !== normaliseText(state.query)) {
+    parts.push(`<p class="notice dym">Did you mean <button class="more-link" data-act="use-ml" data-text="${esc(dym.ml)}" lang="ml">${esc(dym.ml)}</button>${dym.en ? ` <span class="muted">(${esc(dym.en)})</span>` : ''}?</p>`);
+  }
+  if (state.similarOnly && state.books.length && !state.pending.length) {
+    parts.push('<p class="notice" role="status">No exact match found. Showing similar books.</p>');
+  }
+  return parts.join('');
+}
+
 const SOURCE_NAMES = { ia: 'Internet Archive', ol: 'Open Library', google: 'Google Books' };
 function sourceNotices() {
   const notes = Object.entries(state.errors).map(([k, e]) => {
-    if (k === 'google' && e?.status === 429) return 'Google Books: free daily quota used up, so previews may be missing. (Site owner: add a key in js/config.js.)';
+    if (k === 'google' && e?.status === 429) return `Google Books: free daily quota used up${e.cooldown ? ' (pausing it for a few minutes)' : ''}, so previews may be missing. (Site owner: add a key in js/config.js.)`;
+    if (e?.status === 429) return `${SOURCE_NAMES[k] || k} is rate-limiting us; skipping it for a few minutes.`;
     if (k === 'google' && e?.status === 403) return 'Google Books refused the request (check the API key restrictions in js/config.js).';
     return `${SOURCE_NAMES[k] || k} didn’t respond${e?.status ? ` (HTTP ${e.status})` : ''}; results may be incomplete.`;
   });

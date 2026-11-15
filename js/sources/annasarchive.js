@@ -16,7 +16,7 @@ export async function searchAnnasArchive({ text, field = 'all', signal }) {
     cacheKey,
     signal,
   });
-  return (data || []).map(toBook).filter(Boolean);
+  return (data.results || []).map(toBook).filter(Boolean);
 }
 
 function toBook(item) {

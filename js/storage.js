@@ -112,8 +112,8 @@ export function toggleBookmark(book, page) {
 }
 
 function slimBook(b) {
-  const { key, source, archiveId, title, author, category, coverUrl, state, year, previewLink, isLocal } = b;
-  return { key, source, archiveId, title, author, category, coverUrl, state, year, previewLink, isLocal };
+  const { key, source, archiveId, title, author, category, coverUrl, state, year, previewLink, isLocal, shared, sharedId, pdfUrl, pdfFallbackUrl, size } = b;
+  return { key, source, archiveId, title, author, category, coverUrl, state, year, previewLink, isLocal, shared, sharedId, pdfUrl, pdfFallbackUrl, size };
 }
 
 // ---- Settings ----

@@ -310,6 +310,39 @@ main {
 .fine { font-size: 12px; color: var(--muted); margin-top: 16px; }
 .sources { font-size: 12px; color: var(--muted); }
 
+/* ---------- add-a-book form ---------- */
+.add-form { display: grid; gap: 14px; padding-top: 4px; }
+.field { display: grid; gap: 6px; font-size: 14px; font-weight: 600; min-width: 0; }
+.field small { font-weight: 400; color: var(--muted); }
+.field input, .field select {
+  width: 100%; min-height: 48px; padding: 0 14px; border: 1.5px solid var(--line); border-radius: 12px;
+  background: var(--bg); font-size: 16px; font-weight: 400;
+}
+.field input:focus, .field select:focus { border-color: var(--accent); outline: none; }
+.field-row { display: grid; grid-template-columns: 1.4fr 1fr; gap: 10px; }
+.vis { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; }
+.vis legend { padding: 0; margin-bottom: 8px; font-size: 14px; font-weight: 600; }
+.vis-opt {
+  display: flex; align-items: flex-start; gap: 12px; min-height: 56px; padding: 10px 12px;
+  border: 1.5px solid var(--line); border-radius: 12px; cursor: pointer;
+}
+.vis-opt:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.vis-opt:has(input:disabled) { opacity: .6; cursor: not-allowed; }
+.vis-opt input, .check input { flex: none; width: 22px; height: 22px; margin: 2px 0 0; accent-color: var(--accent); }
+.vis-opt span { display: grid; line-height: 1.4; }
+.vis-opt small { color: var(--muted); font-size: 13px; }
+.public-extra { display: grid; gap: 12px; }
+.public-extra .fine { margin: 0; line-height: 1.6; }
+.check { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; font-size: 14px; line-height: 1.5; cursor: pointer; }
+.form-error { margin: 0; padding: 10px 12px; border-radius: 10px; font-size: 14px; color: #8a1c1c; background: #fde8e6; }
+:root[data-theme="dark"] .form-error { color: #ffc9c4; background: #4a1f1c; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .form-error { color: #ffc9c4; background: #4a1f1c; } }
+.upload-progress { display: grid; gap: 6px; font-size: 13px; }
+.upload-progress .bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.upload-progress .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.btn:disabled { opacity: .6; cursor: default; }
+.badge.SHARED { background: #0f6b78; color: #fff; }
+
 /* ---------- shelf ---------- */
 .shelf-group + .shelf-group { margin-top: 22px; }
 

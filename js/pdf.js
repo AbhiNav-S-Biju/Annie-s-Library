@@ -1,4 +1,4 @@
-// "Add my PDF": render a user-owned PDF with PDF.js into the same flip reader.
+// "Add book": render a user-owned PDF with PDF.js into the same flip reader.
 // Nothing is uploaded. Files are optionally kept in IndexedDB (this device only) so they can be reopened.
 import { loadPdfJs } from './vendor.js';
 
@@ -67,9 +67,29 @@ async function tx(mode, fn) {
     t.onabort = () => reject(t.error);
   });
 }
-export async function savePdf(file) {
+/** A small JPEG of page 1, for use as the book's cover. Returns null if it can't be made. */
+export async function pdfCover(file, width = 360) {
+  let src;
   try {
-    const key = pdfKey(file);
+    src = await pdfSource(file);
+    const url = await src.load(0, { width });
+    const blob = await (await fetch(url)).blob();
+    src.release(0, url);
+    return blob;
+  } catch { return null; } finally { src?.destroy(); }
+}
+
+export function blobToDataUrl(blob) {
+  return new Promise((resolve) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => resolve('');
+    r.readAsDataURL(blob);
+  });
+}
+
+export async function savePdf(file, key = pdfKey(file)) {
+  try {
     await tx('readwrite', (s) => s.put({ key, name: file.name, size: file.size, added: Date.now(), blob: file }));
     return true;
   } catch { return false; }

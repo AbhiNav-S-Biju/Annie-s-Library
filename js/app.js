@@ -13,6 +13,7 @@ import { pushOverlay } from './overlay.js';
 import { loadPageFlip } from './vendor.js';
 import { manglishToMalayalam } from './search/transliteration.js';
 import { HttpError } from './net.js';
+import { listPublicBooks, publishBook, unpublishBook, fetchPublicPdf, getToken, setToken, checkToken, canPublish } from './publicBooks.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = escapeHtml;
@@ -22,6 +23,7 @@ const state = {
   query: '',
   category: 'all',
   featured: [],
+  shared: [],        // public books published by the owner (see publicBooks.js)
   featuredError: null,
   books: [],
   pending: [],
@@ -45,7 +47,7 @@ async function init() {
   applyTheme();
   bindUi();
   renderLibrary(); // skeletons right away
-  await loadFeatured();
+  await Promise.all([loadFeatured(), loadShared()]);
   search();
   registerSw();
   loadFuse(); // fuzzy matcher for suggestions (built-in fallback is used until/unless it loads)
@@ -78,6 +80,10 @@ async function loadFeatured() {
   if (Array.isArray(copy) && copy.length) { use(copy); return; }
   state.featured = [];
   state.featuredError = lastErr;
+}
+
+async function loadShared() {
+  state.shared = await listPublicBooks();
 }
 
 function featuredToBook(f) {
@@ -224,7 +230,7 @@ function search() {
   intelligentSearch({
     text: state.query,
     category: state.category,
-    featured: state.featured,
+    featured: [...state.featured, ...state.shared],
     field: state.field,
     sort: state.sort,
     signal: ctrl.signal,
@@ -255,7 +261,7 @@ const SUGG_LABEL = { correction: 'Did you mean', transliteration: 'In Malayalam'
 function renderSuggestions(text) {
   const box = $('#suggest');
   const list = state.tab === 'library'
-    ? getSuggestions(text, { field: state.field, featured: state.featured, books: state.books })
+    ? getSuggestions(text, { field: state.field, featured: [...state.featured, ...state.shared], books: state.books })
     : [];
   suggestionsShown = list;
   if (!list.length) { hideSuggestions(); return; }
@@ -359,7 +365,8 @@ function renderLibrary() {
   if (!state.query) {
     if (state.category === 'all') html += continueReadingSection();
     const featured = sortBooks(state.books.filter((b) => b.featured), state.sort);
-    const more = sortBooks(state.books.filter((b) => !b.featured), state.sort);
+    const shared = sortBooks(state.books.filter((b) => b.shared && !b.featured), state.sort);
+    const more = sortBooks(state.books.filter((b) => !b.featured && !b.shared), state.sort);
     html += section('Featured', 'തിരഞ്ഞെടുത്തവ', featured, {
       loading: loading && !featured.length && !state.featured.length && !state.featuredError,
       empty: state.featuredError
@@ -368,6 +375,7 @@ function renderLibrary() {
           : 'You’re offline. They’ll appear when you’re back online.')
         : emptyState(`No featured books in ${cat.label}.`, 'Try another category, or browse everything below.', '<button class="btn small" data-act="all">Show all</button>'),
     });
+    if (shared.length) html += section('Shared books', 'ഈ ലൈബ്രറിയിൽ നിന്ന്', shared, {});
     html += section(state.category === 'all' ? 'More free books' : `More free ${cat.label.toLowerCase()}`, 'സൗജന്യം · Internet Archive', more, {
       loading: loading && !more.length,
       empty: state.errors.ia ? sourceError('ia', state.errors.ia) : emptyState('Nothing else found here.', 'Internet Archive has no openly readable books in this category right now.'),
@@ -424,18 +432,18 @@ function coverHtml(b, { badge = true } = {}) {
   const [c1, c2] = COVER_COLORS[h % COVER_COLORS.length];
   const prog = store.getProgress(b.key);
   const pct = prog && prog.total ? Math.round(((prog.page + 1) / prog.total) * 100) : 0;
-  const badgeText = b.isLocal ? 'My PDF' : BADGE[b.state];
+  const badgeText = b.isLocal ? 'My PDF' : b.shared ? 'Shared' : BADGE[b.state];
   return `<div class="cover" style="--c1:${c1};--c2:${c2}">
       <div class="fallback" aria-hidden="true"><b>${esc(b.title)}</b><span>${esc(b.author || '')}</span></div>
       ${b.coverUrl ? `<img class="cover-img" src="${esc(b.coverUrl)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ''}
-      ${badge ? `<span class="badge ${b.isLocal ? 'MINE' : b.state}">${badgeText}</span>` : ''}
+      ${badge ? `<span class="badge ${b.isLocal ? 'MINE' : b.shared ? 'SHARED' : b.state}">${badgeText}</span>` : ''}
       ${pct > 1 ? `<span class="progress-bar" aria-hidden="true"><i style="width:${pct}%"></i></span>` : ''}
     </div>`;
 }
 
 function cardHtml(b) {
   rememberBook(b);
-  const label = `${b.title}${b.author ? ', ' + b.author : ''}. ${b.isLocal ? 'Your PDF' : BADGE[b.state]}`;
+  const label = `${b.title}${b.author ? ', ' + b.author : ''}. ${b.isLocal ? 'Your PDF' : b.shared ? 'Shared book' : BADGE[b.state]}`;
   return `<li><button class="card" data-book="${esc(b.key)}" aria-label="${esc(label)}">
       ${coverHtml(b)}
       <span class="card-title">${esc(b.title)}</span>
@@ -496,8 +504,8 @@ function sourceNotices() {
 // ---------------- detail sheet ----------------
 let sheetClose = null;
 
-function openSheet(book) {
-  if (!book) return;
+/** Bottom sheet (phone) / side panel (tablet+). Returns its parts; `close()` goes through history. */
+function createSheet(label) {
   sheetClose?.();
   const backdrop = document.createElement('div');
   backdrop.className = 'backdrop';
@@ -505,7 +513,7 @@ function openSheet(book) {
   sheet.className = 'sheet';
   sheet.setAttribute('role', 'dialog');
   sheet.setAttribute('aria-modal', 'true');
-  sheet.setAttribute('aria-label', book.title);
+  sheet.setAttribute('aria-label', label);
   sheet.innerHTML = `<div class="sheet-grab" aria-hidden="true"></div>
     <button class="icon-btn sheet-close" aria-label="Close">${icons.close}</button>
     <div class="sheet-body"></div>`;
@@ -530,15 +538,20 @@ function openSheet(book) {
   sheet.querySelector('.sheet-close').addEventListener('click', close);
   sheet.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
   enableDragToClose(sheet, close);
-
-  renderSheet(sheet.querySelector('.sheet-body'), book, ctrl.signal);
-  settleCovers(sheet);
   requestAnimationFrame(() => { sheet.classList.add('on'); backdrop.classList.add('on'); });
+  return { sheet, body: sheet.querySelector('.sheet-body'), close, signal: ctrl.signal };
+}
+
+function openSheet(book) {
+  if (!book) return;
+  const { sheet, body, signal } = createSheet(book.title);
+  renderSheet(body, book, signal);
+  settleCovers(sheet);
   setTimeout(() => sheet.querySelector('.detail-actions .btn, .sheet-close')?.focus({ preventScroll: true }), 50);
 }
 
 function renderSheet(body, book, signal) {
-  const metaBits = [book.year, catLabel(book.category), book.isLocal ? 'On this device' : null].filter(Boolean);
+  const metaBits = [book.year, catLabel(book.category), book.isLocal ? 'On this device' : null, book.shared && book.size ? `${(book.size / 1048576).toFixed(1)} MB` : null].filter(Boolean);
   const entry = store.shelfEntry(book.key);
   const prog = store.getProgress(book.key);
   body.innerHTML = `
@@ -548,7 +561,7 @@ function renderSheet(body, book, signal) {
         <h2 class="detail-title">${esc(book.title)}</h2>
         ${book.author && !book.isLocal ? `<p class="detail-meta"><button class="author-link" data-author="${esc(book.author)}" aria-label="More books by ${esc(book.author)}">${esc(book.author)}</button></p>` : book.author ? `<p class="detail-meta">${esc(book.author)}</p>` : ''}
         <p class="detail-meta">${metaBits.map((m) => `<span>${esc(m)}</span>`).join('')}</p>
-        <p class="detail-meta"><span class="badge ${book.isLocal ? 'MINE' : book.state}" style="position:static;display:inline-block;margin-top:6px">${book.isLocal ? 'My PDF' : BADGE[book.state]}</span></p>
+        <p class="detail-meta"><span class="badge ${book.isLocal ? 'MINE' : book.shared ? 'SHARED' : book.state}" style="position:static;display:inline-block;margin-top:6px">${book.isLocal ? 'My PDF' : book.shared ? 'Shared' : BADGE[book.state]}</span></p>
       </div>
     </div>
     <div class="detail-actions">${actionsHtml(book, prog)}</div>
@@ -556,10 +569,12 @@ function renderSheet(body, book, signal) {
       ${store.STATUSES.map((s) => `<button class="chip" data-status="${s.id}" aria-pressed="${entry?.status === s.id}">${esc(s.label)}<small lang="ml">${esc(s.ml)}</small></button>`).join('')}
     </div>
     ${entry?.bookmarks?.length ? `<p class="detail-meta" style="margin-top:12px">Bookmarks: ${entry.bookmarks.map((p) => `<button class="chip" data-goto="${p}" style="min-height:36px">p. ${p + 1}</button>`).join(' ')}</p>` : ''}
-    <div class="detail-desc-wrap">${book.description ? descHtml(book.description) : book.isLocal ? '' : '<div class="skel skel-line"></div><div class="skel skel-line"></div><div class="skel skel-line short"></div>'}</div>
+    <div class="detail-desc-wrap">${book.description ? descHtml(book.description) : book.isLocal || book.shared ? '' : '<div class="skel skel-line"></div><div class="skel skel-line"></div><div class="skel skel-line short"></div>'}</div>
     ${linksHtml(book)}
     <p class="fine">${book.isLocal
       ? 'This PDF stays on your device. Nothing is uploaded.'
+      : book.shared
+        ? `Shared by this library’s owner, so it appears on every device.${book.pendingPublish ? ' Just published: other devices will see it in about a minute.' : ''} If it shouldn’t be here, please report it.`
       : book.state === 'READ'
         ? 'Free copy from Internet Archive. If this looks like an unauthorised copy of an in-copyright book, please report it.'
         : 'This book appears to be in copyright, so the app only links to legitimate previews and stores.'}</p>`;
@@ -590,7 +605,29 @@ function renderSheet(body, book, signal) {
     if (m) { m.previousElementSibling.classList.remove('clamp'); m.remove(); }
   });
 
-  if (!book.description && !book.isLocal) loadDescription(book, signal).then((d) => {
+  body.querySelector('[data-unpublish]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    if (btn.dataset.sure !== '1') { btn.dataset.sure = '1'; btn.querySelector('span').textContent = 'Tap again to remove it for everyone'; return; }
+    btn.disabled = true;
+    btn.querySelector('span').textContent = 'Removing…';
+    try {
+      await unpublishBook(book);
+      const { deletePdf } = await import('./pdf.js');
+      await deletePdf(book.key);
+      state.shared = state.shared.filter((b) => b.key !== book.key);
+      state.books = state.books.filter((b) => b.key !== book.key);
+      store.setStatus(book, null);
+      toast('Removed. It disappears from other devices in about a minute.');
+      sheetClose?.();
+    } catch (err) {
+      btn.disabled = false;
+      btn.dataset.sure = '';
+      btn.querySelector('span').textContent = 'Remove for everyone';
+      toast(err.message);
+    }
+  });
+
+  if (!book.description && !book.isLocal && !book.shared) loadDescription(book, signal).then((d) => {
     if (signal.aborted) return;
     const wrap = body.querySelector('.detail-desc-wrap');
     if (wrap) wrap.innerHTML = d ? descHtml(d) : '<p class="muted detail-desc">No description available.</p>';
@@ -617,7 +654,8 @@ function actionsHtml(book, prog) {
   if (book.isLocal || book.state === 'READ') {
     const label = prog && prog.page > 0 ? `Continue reading · page ${prog.page + 1}` : 'Read now';
     return `<button class="btn block" data-read>${icons.book}<span>${label}</span></button>
-      ${book.isLocal ? `<button class="btn block ghost" data-remove-pdf>${icons.trash}<span>Remove from this device</span></button>` : ''}`;
+      ${book.isLocal ? `<button class="btn block ghost" data-remove-pdf>${icons.trash}<span>Remove from this device</span></button>` : ''}
+      ${book.shared && canPublish() ? `<button class="btn block ghost" data-unpublish>${icons.trash}<span>Remove for everyone</span></button>` : ''}`;
   }
   if (book.state === 'PREVIEW') {
     return `<a class="btn block" href="${esc(book.previewLink)}" target="_blank" rel="noopener">${icons.eye}<span>Preview on Google Books</span></a>`;
@@ -630,7 +668,7 @@ function linksHtml(book) {
   const links = [];
   if (book.link) links.push(`<a class="menu-link" href="${esc(book.link)}" target="_blank" rel="noopener" style="padding:0">${icons.external}<span>View on ${esc(book.archiveId ? 'archive.org' : book.source === 'google' ? 'Google Books' : 'Open Library')}</span></a>`);
   if (book.state === 'READ' && !book.isLocal) links.push(`<a class="menu-link" href="${esc(reportUrl(book))}" target="_blank" rel="noopener" style="padding:0">${icons.flag}<span>Report bad scan or copyright problem</span></a>`);
-  const src = (book.sources || [book.source]).map((s) => ({ ia: 'Internet Archive', google: 'Google Books', openlibrary: 'Open Library', local: 'Your device' }[s] || s));
+  const src = (book.sources || [book.source]).map((s) => ({ ia: 'Internet Archive', google: 'Google Books', openlibrary: 'Open Library', local: 'Your device', shared: 'Shared by this library' }[s] || s));
   return `${links.join('')}<p class="sources">Sources: ${esc(src.join(', '))}</p>`;
 }
 
@@ -687,6 +725,7 @@ function enableDragToClose(sheet, close) {
 // ---------------- reading ----------------
 function openBook(book) {
   if (book.isLocal) { openLocalPdf(book); return; }
+  if (book.shared) { openSharedPdf(book); return; }
   if (!book.archiveId) return;
   const id = book.archiveId;
   const source = getBookManifest(id).then((m) => ({
@@ -702,31 +741,159 @@ function openBook(book) {
   });
 }
 
-async function onPdfPicked(e) {
+function onPdfPicked(e) {
   const file = e.target.files?.[0];
   e.target.value = '';
   if (!file) return;
   if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) { toast('Please choose a PDF file.'); return; }
-  const { pdfKey, pdfSource, savePdf } = await import('./pdf.js');
-  const book = {
-    key: pdfKey(file),
-    source: 'local',
-    isLocal: true,
-    title: file.name.replace(/\.pdf$/i, ''),
-    author: 'My PDF',
-    category: 'other',
-    state: 'READ',
-  };
-  savePdf(file).then((ok) => { if (!ok) toast('Opened, but this browser can’t keep the file for later.'); });
-  if (!store.shelfEntry(book.key)?.status) store.setStatus(book, 'reading');
-  openReader({ book, source: pdfSource(file).catch((err) => { throw new Error(`Couldn’t read this PDF (${err.message}).`); }) });
+  openAddBookForm(file);
+}
+
+/** "Add a book": details + Private (this device) or Public (every device). */
+function openAddBookForm(file) {
+  const { sheet, body, close } = createSheet('Add a book');
+  const mb = (file.size / 1048576).toFixed(1);
+  const tooBig = file.size > CONFIG.publicBooks.maxMb * 1048576;
+  const guessTitle = file.name.replace(/\.pdf$/i, '').replace(/[_]+/g, ' ').trim();
+  body.innerHTML = `
+    <form class="add-form" novalidate>
+      <h2 class="detail-title">Add a book</h2>
+      <p class="detail-meta">${esc(file.name)} · ${mb} MB</p>
+      <label class="field"><span>Title</span><input name="title" required maxlength="200" value="${esc(guessTitle)}" autocomplete="off"></label>
+      <label class="field"><span>Author <small>(optional)</small></span><input name="author" maxlength="200" autocomplete="off"></label>
+      <div class="field-row">
+        <label class="field"><span>Category</span><select name="category">${CONFIG.categories.filter((c) => c.id !== 'all').map((c) => `<option value="${c.id}"${c.id === 'other' ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select></label>
+        <label class="field"><span>Year <small>(optional)</small></span><input name="year" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off"></label>
+      </div>
+      <fieldset class="vis">
+        <legend>Who can see it?</legend>
+        <label class="vis-opt"><input type="radio" name="vis" value="private" checked>
+          <span><b>Private</b><small>Only on this device. Nothing is uploaded.</small></span></label>
+        <label class="vis-opt"><input type="radio" name="vis" value="public"${tooBig ? ' disabled' : ''}>
+          <span><b>Public</b><small>${tooBig ? `Not available: public books can be up to ${CONFIG.publicBooks.maxMb} MB.` : 'Everyone who opens this library, on any device.'}</small></span></label>
+      </fieldset>
+      <div class="public-extra" hidden>
+        <div class="token-setup"${getToken() ? ' hidden' : ''}>
+          <label class="field"><span>GitHub access token</span><input name="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></label>
+          <p class="fine">One-time setup on this device. Public books are saved into this site’s GitHub repository, so publishing needs a token from the repository’s owner:
+            <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">create a fine-grained token</a> →
+            Repository access: only <b>${esc(CONFIG.publicBooks.repo.split('/')[1])}</b> → Permissions: <b>Contents: Read and write</b>.
+            It is stored only in this browser.</p>
+        </div>
+        <p class="fine token-ok"${getToken() ? '' : ' hidden'}>Publishing is set up on this device. <button type="button" class="more-link" data-forget-token>Remove token</button></p>
+        <label class="check"><input type="checkbox" name="rights">
+          <span>I wrote this book, or it is free to share (public domain or openly licensed). I understand it will be visible to anyone.</span></label>
+      </div>
+      <p class="form-error" role="alert" hidden></p>
+      <div class="upload-progress" hidden><div class="bar"><i></i></div><span class="muted"></span></div>
+      <button class="btn block" type="submit">${icons.upload}<span>Add book</span></button>
+    </form>`;
+  const form = body.querySelector('form');
+  const extra = form.querySelector('.public-extra');
+  const err = form.querySelector('.form-error');
+  const prog = form.querySelector('.upload-progress');
+  const submit = form.querySelector('[type="submit"]');
+  const showErr = (m) => { err.textContent = m; err.hidden = !m; if (m) err.scrollIntoView({ block: 'nearest' }); };
+
+  form.addEventListener('change', (e) => {
+    if (e.target.name === 'vis') {
+      extra.hidden = form.vis.value !== 'public';
+      submit.querySelector('span').textContent = form.vis.value === 'public' ? 'Publish for everyone' : 'Add book';
+      showErr('');
+    }
+  });
+  form.querySelector('[data-forget-token]').addEventListener('click', () => {
+    setToken('');
+    form.querySelector('.token-setup').hidden = false;
+    form.querySelector('.token-ok').hidden = true;
+  });
+
+  let busy = false;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (busy) return;
+    const title = form.title.value.trim();
+    const author = form.author.value.trim();
+    const year = /^\d{4}$/.test(form.year.value.trim()) ? +form.year.value.trim() : null;
+    const category = form.category.value;
+    const isPublic = form.vis.value === 'public';
+    if (!title) { showErr('Please give the book a title.'); form.title.focus(); return; }
+    if (form.year.value.trim() && !year) { showErr('Year should be four digits, like 1925.'); form.year.focus(); return; }
+    if (isPublic) {
+      const typed = form.token.value.trim();
+      if (!getToken() && !typed) { showErr('Paste your GitHub access token to publish.'); form.token.focus(); return; }
+      if (!form.rights.checked) { showErr('Please confirm you’re allowed to share this book publicly.'); form.rights.focus(); return; }
+    }
+    busy = true;
+    submit.disabled = true;
+    showErr('');
+    const pdf = await import('./pdf.js');
+    try {
+      // The cover is a nicety: never let it hold up adding the book (rendering can stall in a
+      // background tab or on a damaged first page).
+      const cover = await Promise.race([
+        pdf.pdfCover(file, isPublic ? 360 : 220),
+        new Promise((resolve) => setTimeout(() => resolve(null), 4000)),
+      ]);
+      if (!isPublic) {
+        const book = { key: pdf.pdfKey(file), source: 'local', isLocal: true, title, author: author || 'My PDF', category, year, state: 'READ', coverUrl: cover ? await pdf.blobToDataUrl(cover) : null };
+        const kept = await pdf.savePdf(file);
+        store.setStatus(book, store.shelfEntry(book.key)?.status || 'reading');
+        // Closing the form goes through history (popstate). Open the reader only after that has
+        // happened, otherwise the pending "back" would close the reader instead of the form.
+        window.addEventListener('popstate', () => {
+          toast(kept ? 'Added to My Shelf (this device only).' : 'Opened, but this browser can’t keep the file for later.');
+          openReader({ book, source: pdf.pdfSource(file).catch((er) => { throw new Error(`Couldn’t read this PDF (${er.message}).`); }) });
+        }, { once: true });
+        close();
+        return;
+      }
+      const typed = form.token.value.trim();
+      if (typed) {
+        const check = await checkToken(typed);
+        if (!check.ok) throw new Error(check.message);
+        setToken(typed);
+      }
+      prog.hidden = false;
+      const book = await publishBook({
+        file, title, author, category, year, cover,
+        onProgress: (f, stage) => {
+          prog.querySelector('i').style.width = `${Math.round(f * 100)}%`;
+          prog.querySelector('span').textContent = `${stage}… ${Math.round(f * 100)}%`;
+        },
+      });
+      await pdf.savePdf(file, book.key); // so it opens instantly here, before the site rebuilds
+      if (cover) book.coverUrl = await pdf.blobToDataUrl(cover);
+      state.shared = [book, ...state.shared];
+      close();
+      toast('Published. Other devices will see it in about a minute.');
+      search();
+    } catch (er) {
+      showErr(er.message || 'Something went wrong. Please try again.');
+      prog.hidden = true;
+    } finally {
+      busy = false;
+      submit.disabled = false;
+    }
+  });
+  setTimeout(() => form.title.focus({ preventScroll: true }), 60);
+  void sheet;
+}
+
+async function openSharedPdf(book) {
+  const source = (async () => {
+    const { getPdf, pdfSource } = await import('./pdf.js');
+    const blob = (await getPdf(book.key)) || (await fetchPublicPdf(book));
+    return pdfSource(blob);
+  })();
+  openReader({ book, source, reportUrl });
 }
 
 async function openLocalPdf(book) {
   const { getPdf, pdfSource } = await import('./pdf.js');
   const blob = await getPdf(book.key);
   if (!blob) {
-    toast('This PDF isn’t stored on this device any more. Add it again with “Add my PDF”.');
+    toast('This PDF isn’t stored on this device any more. Add it again with “Add book”.');
     return;
   }
   openReader({ book, source: pdfSource(blob) });

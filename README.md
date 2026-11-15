@@ -8,7 +8,7 @@ backend, no build step, no accounts.
 - **Read**: public-domain scans from Internet Archive, in a full-screen page-flip reader.
 - **Preview**: Google Books limited previews (link out).
 - **Buy**: in-copyright books get search links to Amazon.in, Flipkart and DC Books. No scraping, no store APIs.
-- **Add my PDF**: read a PDF you own in the same reader. It stays on your device.
+- **Add book**: add a PDF as **Private** (stays on this device) or **Public** (shown on every device).
 - **Search by author** (or title & author), and **sort** by best match, oldest first or newest
   first. Tap an author's name in a book's details to see all their books.
 - **My Shelf**: Want to read / Reading / Finished, bookmarks, and last-read page, all stored locally.
@@ -27,7 +27,7 @@ Then open http://localhost:5173. To test on a phone on the same Wi-Fi, run
 and fullscreen only work on `localhost` or HTTPS, so test install/offline after deploying.
 
 `dev/reader-test.html` opens the reader on one hard-coded book (delivery step 1). `dev/sample.pdf`
-is a 3-page PDF for trying "Add my PDF".
+is a 3-page PDF for trying "Add book".
 
 ## Configuration
 
@@ -69,6 +69,40 @@ Everything is in **`js/config.js`**:
 `drama`, `other`. Writing the title as "Malayalam (English)" helps search: both spellings match.
 
 The list is fetched fresh on each visit, so edits show up after a deploy without bumping anything.
+
+## Add your own books (Private or Public)
+
+Tap **Add book**, pick a PDF, fill in the title (author, category and year are optional), and choose:
+
+- **Private:** the PDF is stored in this browser only (IndexedDB). Nothing is uploaded. It appears in
+  My Shelf on this device.
+- **Public:** the PDF is committed to this site's GitHub repository under `public-books/` and listed
+  in `public-books/index.json`. Every device then shows it under **Shared books**, and search finds it.
+  Other devices see it after the site rebuilds, which takes about a minute; the device that
+  published it can open it straight away.
+
+There is still no server: GitHub is the storage. So publishing needs a GitHub access token from the
+repository owner, entered once per device:
+
+1. Open https://github.com/settings/personal-access-tokens/new (fine-grained token).
+2. Repository access → **Only select repositories** → this repository.
+3. Permissions → Repository permissions → **Contents: Read and write**. Nothing else.
+4. Generate, copy, and paste it into the Add book form the first time you choose Public.
+
+The token is kept in that browser's storage only. Anyone using that browser could publish with it, so
+don't set it up on a shared device; "Remove token" in the form forgets it. Visitors without a token
+can read public books but can't add or remove them.
+
+Things to know:
+
+- **Public means public.** The site and the repository are open to anyone on the internet, so only
+  publish books you wrote or that are free to share (public domain or openly licensed). The form asks
+  you to confirm this.
+- Public PDFs can be up to 50 MB (`CONFIG.publicBooks.maxMb`). GitHub asks repositories to stay
+  under about 1 GB in total, so this suits a small shared collection, not a large one.
+- To remove a public book, open it on a device that has the token and choose **Remove for everyone**.
+  You can also delete its files and its entry in `public-books/index.json` on GitHub.
+- Settings are in `CONFIG.publicBooks` in `js/config.js` (repo, branch, folder, size limit).
 
 ## Deploy
 

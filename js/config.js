@@ -51,6 +51,15 @@ export const CONFIG = {
     'punathil kunjabdulla', 'n. s. madhavan',
   ],
 
+  // Public books: PDFs the owner shares with every device. They are committed to this GitHub repo
+  // (under `dir`) from inside the app, using an access token the owner enters once on their device.
+  publicBooks: {
+    repo: 'AbhiNav-S-Biju/Annie-s-Library', // "owner/repo" of this site
+    branch: 'main',
+    dir: 'public-books',
+    maxMb: 50, // GitHub's API accepts files up to 100 MB; 50 keeps uploads workable on phones
+  },
+
   // Where "Report bad scan" goes. If githubRepo is set ("owner/repo"), a prefilled GitHub issue opens;
   // otherwise a prefilled email to reportEmail (may be empty: the mail app opens with no recipient).
   report: { githubRepo: 'AbhiNav-S-Biju/Annie-s-Library', reportEmail: '' },

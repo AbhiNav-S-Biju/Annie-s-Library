@@ -343,6 +343,24 @@ main {
 .btn:disabled { opacity: .6; cursor: default; }
 .badge.SHARED { background: #0f6b78; color: #fff; }
 
+/* ---------- offline downloads ---------- */
+.dl-slot { display: grid; gap: 8px; }
+.dl { display: grid; gap: 8px; padding: 12px; border: 1.5px solid var(--line); border-radius: 12px; }
+.dl-row, .dl.dl-done { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.dl-text { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; min-width: 0; }
+.dl-done .dl-text svg { width: 20px; height: 20px; color: var(--read); flex: none; }
+.dl .bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.dl .bar i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+.dl .bar[data-indeterminate] i { width: 40% !important; animation: slide 1.2s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+.dl .fine, .dl-slot .fine { margin: 0; }
+.offline-mark {
+  position: absolute; right: 8px; top: 8px; z-index: 2; width: 26px; height: 26px; display: grid; place-items: center;
+  border-radius: 50%; background: var(--surface); color: var(--read); box-shadow: 0 1px 4px rgb(0 0 0 / .3);
+}
+.offline-mark svg { width: 16px; height: 16px; stroke-width: 2.6; }
+.offline-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0 0; }
+
 /* ---------- shelf ---------- */
 .shelf-group + .shelf-group { margin-top: 22px; }
 

@@ -70,6 +70,37 @@ Everything is in **`js/config.js`**:
 
 The list is fetched fresh on each visit, so edits show up after a deploy without bumping anything.
 
+## Read offline (Download)
+
+Open any free-to-read book and tap **Download for offline**. The pages are saved on that device, and
+the book then opens in the same page-flip reader with no internet. Downloaded books show a small
+arrow mark on their cover and are listed under **My Shelf → Downloaded**, where you can also see how
+much space they use and remove them.
+
+- **Internet Archive books:** each page is saved as an image (about 0.2 MB per page, so a 200-page
+  book is around 40 MB). A download takes a few minutes. It can run in the background while you browse
+  (keep the app open), you can cancel at any time, and if it is interrupted it resumes where it
+  stopped. A book you started reading while only partly downloaded fills the missing pages from the
+  internet.
+- **Shared (public) books:** the PDF is saved on the device.
+- The app itself (the library, your shelf, the featured list) also works offline once it has been opened
+  once, so a downloaded book can be opened with no connection at all.
+
+How it works, and why: the reader's normal page images and Internet Archive's PDF files cannot be read
+by a website (the Archive doesn't allow it), so they can't be saved. Its IIIF image service
+(`iiif.archive.org`) does allow it, so downloads use that. It is slower and less reliable than the
+reader's own endpoint: some pages time out at one size and work at another, so every page is tried at
+several widths (1000, 800, 900, 700 px), and a second width is started alongside if the first is slow.
+Settings are in `OFFLINE` at the top of `js/offlineBooks.js`.
+
+Limits:
+- Offline pages are saved at about 1000 px wide, so zooming in offline shows that resolution (online,
+  the reader fetches sharper pages when you zoom).
+- Browsers may delete saved data if the device runs very low on storage; the app asks the browser to
+  keep it, and reopens a book as "Resume download" if pages went missing.
+- If Internet Archive is slow or busy, a few pages may fail; the book then shows **Resume download**.
+- Opening a downloaded book resumes at your last page, the same as online.
+
 ## Add your own books (Private or Public)
 
 Tap **Add book**, pick a PDF, fill in the title (author, category and year are optional), and choose:
@@ -143,6 +174,7 @@ js/search/          the search engine (no UI code):
   searchTypes.js        JSDoc types: SearchQuery, SearchVariant, SearchResult, SearchSuggestion…
 js/sources/*.js     Internet Archive, Google Books, Open Library
 js/pdf.js           PDF.js rendering + IndexedDB storage for your own PDFs
+js/offlineBooks.js  offline downloads: IIIF page download, resume, storage, offline reader source
 js/storage.js       localStorage wrappers (all in try/catch), API response cache
 sw.js               offline app shell, cached libraries/fonts/covers
 ```

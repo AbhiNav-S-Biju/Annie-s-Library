@@ -13,6 +13,7 @@ import { pushOverlay } from './overlay.js';
 import { loadPageFlip } from './vendor.js';
 import { manglishToMalayalam } from './search/transliteration.js';
 import { HttpError } from './net.js';
+import { canDownload, downloadBook, removeOffline, offlineInfo, isDownloaded, listOffline, totalOfflineBytes, offlineSource, onOfflineChange, reconcile, fmtBytes, OfflineError } from './offlineBooks.js';
 import { listPublicBooks, publishBook, unpublishBook, fetchPublicPdf, getToken, setToken, checkToken, canPublish } from './publicBooks.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -37,6 +38,7 @@ const state = {
 };
 
 window.__mlib = state; // handy for debugging in the console
+state.findBook = (key) => findBook(key);
 
 // ---------------- boot ----------------
 async function init() {
@@ -50,6 +52,8 @@ async function init() {
   await Promise.all([loadFeatured(), loadShared()]);
   search();
   registerSw();
+  reconcile().then((gone) => { if (gone.length) renderCurrent(); }).catch(() => {});
+  onOfflineChange(() => { if (!document.querySelector('.reader')) renderCurrent(); });
   loadFuse(); // fuzzy matcher for suggestions (built-in fallback is used until/unless it loads)
   // warm the page-flip library while the user browses
   (window.requestIdleCallback || setTimeout)(() => { if (store.getSettings().flip !== false) loadPageFlip().catch(() => {}); });
@@ -162,6 +166,8 @@ function bindUi() {
     if (act.dataset.act === 'clear') { q.value = ''; $('#clear-q').hidden = true; setQuery(''); }
     if (act.dataset.act === 'all') setCategory('all');
     if (act.dataset.act === 'library') setTab('library');
+    if (act.dataset.act === 'open-downloads') setTab('shelf');
+    if (act.dataset.act === 'dl-clear') clearDownloads();
     if (act.dataset.act === 'use-ml') { q.value = act.dataset.text; $('#clear-q').hidden = false; setQuery(q.value); }
   });
   $('#translit-hint').addEventListener('click', (e) => {
@@ -177,7 +183,9 @@ function bindUi() {
   }, true);
   document.addEventListener('error', (e) => { if (e.target.classList?.contains('cover-img')) coverFail(e.target); }, true);
 
-  window.addEventListener('online', retryAll);
+  window.addEventListener('online', () => { retryAll(); });
+  window.addEventListener('offline', () => renderCurrent());
+  window.addEventListener('beforeunload', (e) => { if (jobs.size) { e.preventDefault(); e.returnValue = ''; } });
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
 }
 
@@ -354,13 +362,21 @@ function renderTranslitHint() {
   hint.innerHTML = `Also searching <button type="button" data-text="${esc(alt)}" lang="ml">${esc(alt)}</button>`;
 }
 
+function renderCurrent() { if (state.tab === 'shelf') renderShelf(); else renderLibrary(); }
+
+function offlineBanner() {
+  if (navigator.onLine || !listOffline().length) return '';
+  return `<div class="notice offline-banner" role="status"><span>You’re offline. Your downloaded books are on your shelf.</span>
+    <button class="btn small" data-act="open-downloads">Open downloads</button></div>`;
+}
+
 function renderLibrary() {
   if (state.tab !== 'library') return;
   renderTranslitHint();
   const main = $('#main');
   const loading = state.pending.length > 0;
   const cat = CONFIG.categories.find((c) => c.id === state.category);
-  let html = '';
+  let html = offlineBanner();
 
   if (!state.query) {
     if (state.category === 'all') html += continueReadingSection();
@@ -437,13 +453,14 @@ function coverHtml(b, { badge = true } = {}) {
       <div class="fallback" aria-hidden="true"><b>${esc(b.title)}</b><span>${esc(b.author || '')}</span></div>
       ${b.coverUrl ? `<img class="cover-img" src="${esc(b.coverUrl)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ''}
       ${badge ? `<span class="badge ${b.isLocal ? 'MINE' : b.shared ? 'SHARED' : b.state}">${badgeText}</span>` : ''}
+      ${badge && isDownloaded(b.key) ? `<span class="offline-mark" title="Saved for offline reading" aria-hidden="true">${icons.offline}</span>` : ''}
       ${pct > 1 ? `<span class="progress-bar" aria-hidden="true"><i style="width:${pct}%"></i></span>` : ''}
     </div>`;
 }
 
 function cardHtml(b) {
   rememberBook(b);
-  const label = `${b.title}${b.author ? ', ' + b.author : ''}. ${b.isLocal ? 'Your PDF' : b.shared ? 'Shared book' : BADGE[b.state]}`;
+  const label = `${b.title}${b.author ? ', ' + b.author : ''}. ${b.isLocal ? 'Your PDF' : b.shared ? 'Shared book' : BADGE[b.state]}${isDownloaded(b.key) ? '. Saved offline' : ''}`;
   return `<li><button class="card" data-book="${esc(b.key)}" aria-label="${esc(label)}">
       ${coverHtml(b)}
       <span class="card-title">${esc(b.title)}</span>
@@ -587,6 +604,8 @@ function renderSheet(body, book, signal) {
     toast(next ? `Added to “${store.STATUSES.find((s) => s.id === next).label}”` : 'Removed from shelf');
   }));
   body.querySelector('[data-read]')?.addEventListener('click', () => openBook(book));
+  const dlSlot = body.querySelector('.dl-slot');
+  if (dlSlot) setupDownloadSlot(dlSlot, book, signal);
   body.querySelector('[data-author]')?.addEventListener('click', (e) => searchAuthor(e.currentTarget.dataset.author));
   body.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => {
     store.setProgress(book.key, +b.dataset.goto, prog?.total || 0);
@@ -654,6 +673,7 @@ function actionsHtml(book, prog) {
   if (book.isLocal || book.state === 'READ') {
     const label = prog && prog.page > 0 ? `Continue reading · page ${prog.page + 1}` : 'Read now';
     return `<button class="btn block" data-read>${icons.book}<span>${label}</span></button>
+      ${canDownload(book) ? '<div class="dl-slot"></div>' : ''}
       ${book.isLocal ? `<button class="btn block ghost" data-remove-pdf>${icons.trash}<span>Remove from this device</span></button>` : ''}
       ${book.shared && canPublish() ? `<button class="btn block ghost" data-unpublish>${icons.trash}<span>Remove for everyone</span></button>` : ''}`;
   }
@@ -722,12 +742,120 @@ function enableDragToClose(sheet, close) {
   grab.addEventListener('pointercancel', end);
 }
 
+// ---------------- offline downloads ----------------
+const jobs = new Map();          // book key -> {done, total, bytes, failed, kind, ctrl}
+const lastError = new Map();     // book key -> message from the last failed attempt
+const jobListeners = new Map();  // book key -> Set<fn>
+let wakeLock = null;
+
+function emitJob(key) { jobListeners.get(key)?.forEach((fn) => fn()); }
+
+async function holdScreen(on) {
+  try {
+    if (on && !wakeLock) { wakeLock = await navigator.wakeLock?.request('screen'); wakeLock?.addEventListener('release', () => { wakeLock = null; }); }
+    else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch { /* optional */ }
+}
+
+async function startDownload(book) {
+  if (jobs.has(book.key)) return;
+  const ctrl = new AbortController();
+  const job = { done: 0, total: book.shared ? book.size || 0 : 0, bytes: 0, failed: 0, kind: book.shared ? 'pdf' : 'pages', ctrl };
+  jobs.set(book.key, job);
+  lastError.delete(book.key);
+  holdScreen(true);
+  emitJob(book.key);
+  try {
+    await downloadBook(book, { signal: ctrl.signal, onProgress: (p) => { Object.assign(job, p); emitJob(book.key); } });
+    toast(`“${book.title}” is saved for offline reading.`);
+  } catch (e) {
+    if (e?.name === 'AbortError') toast('Download stopped. What was saved is kept, so you can resume later.');
+    else {
+      const msg = e instanceof OfflineError ? e.message : 'The download failed. Check your connection and try again.';
+      lastError.set(book.key, msg);
+      toast(msg.length > 90 ? 'The download didn’t finish. Open the book to resume.' : msg);
+    }
+  } finally {
+    jobs.delete(book.key);
+    if (!jobs.size) holdScreen(false);
+    emitJob(book.key);
+  }
+}
+
+function renderDownloadSlot(slot, book, hint = '') {
+  const job = jobs.get(book.key);
+  const rec = offlineInfo(book.key);
+  const err = lastError.get(book.key);
+  if (job) {
+    const pct = job.total ? Math.min(100, Math.round((job.done / job.total) * 100)) : 0;
+    const what = job.kind === 'pdf' ? 'Downloading…' : `Downloading ${job.done} of ${job.total || '…'} pages · ${fmtBytes(job.bytes)}`;
+    slot.innerHTML = `<div class="dl" role="group" aria-label="Download progress">
+      <div class="dl-row"><span class="dl-text">${esc(what)}</span><button class="btn small ghost" data-dl-cancel>Cancel</button></div>
+      <div class="bar"${job.kind === 'pdf' ? ' data-indeterminate' : ''}><i style="width:${job.kind === 'pdf' ? 100 : pct}%"></i></div>
+      <p class="fine">You can close this and keep browsing. Keep the app open until it finishes.</p></div>`;
+  } else if (rec?.complete) {
+    slot.innerHTML = `<div class="dl dl-done"><span class="dl-text">${icons.check}<span>Saved offline · ${esc(fmtBytes(rec.bytes))}</span></span>
+      <button class="btn small ghost" data-dl-remove>Remove download</button></div>`;
+  } else if (rec && rec.kind === 'pages' && rec.have > 0) {
+    slot.innerHTML = `<button class="btn block ghost" data-dl>${icons.download}<span>Resume download · ${rec.have} of ${rec.count} pages</span></button>
+      ${err ? `<p class="form-error" role="alert">${esc(err)}</p>` : ''}
+      <button class="more-link" data-dl-remove>Discard the ${esc(fmtBytes(rec.bytes))} downloaded so far</button>`;
+  } else {
+    slot.innerHTML = `<button class="btn block ghost" data-dl>${icons.download}<span>Download for offline</span></button>
+      ${err ? `<p class="form-error" role="alert">${esc(err)}</p>` : `<p class="fine">${esc(hint || 'Saves the pages on this device so you can read without internet.')}</p>`}`;
+  }
+}
+
+function setupDownloadSlot(slot, book, signal) {
+  let hint = book.shared && book.size ? `Saves this book on this device (${fmtBytes(book.size)}) so you can read without internet.` : '';
+  const draw = () => renderDownloadSlot(slot, book, hint);
+  draw();
+  const set = jobListeners.get(book.key) || new Set();
+  set.add(draw);
+  jobListeners.set(book.key, set);
+  signal.addEventListener('abort', () => set.delete(draw), { once: true });
+  if (!book.shared && book.archiveId && !isDownloaded(book.key) && navigator.onLine) {
+    getBookManifest(book.archiveId, { signal }).then((m) => {
+      hint = `${m.count} pages · about ${fmtBytes(m.count * 190 * 1024)} on this device. Takes a few minutes; you can keep browsing.`;
+      if (!jobs.has(book.key)) draw();
+    }).catch(() => {});
+  }
+  slot.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-dl]')) startDownload(book);
+    else if (e.target.closest('[data-dl-cancel]')) jobs.get(book.key)?.ctrl.abort();
+    else if (e.target.closest('[data-dl-remove]')) {
+      await removeOffline(book);
+      toast('Download removed from this device.');
+      draw();
+    }
+  });
+}
+
+async function clearDownloads() {
+  const n = listOffline().length;
+  if (!n || !confirm(`Remove all ${n} downloaded book${n > 1 ? 's' : ''} from this device? You can download them again later.`)) return;
+  for (const r of listOffline()) await removeOffline(r.key);
+  toast('Downloads removed.');
+  renderCurrent();
+}
+
 // ---------------- reading ----------------
 function openBook(book) {
   if (book.isLocal) { openLocalPdf(book); return; }
   if (book.shared) { openSharedPdf(book); return; }
   if (!book.archiveId) return;
   const id = book.archiveId;
+  const saved = offlineInfo(book.key);
+  if (saved && saved.kind === 'pages' && (saved.complete || saved.have > 0)) {
+    // Downloaded: read from this device. A partly downloaded book fills any gaps from the network when online.
+    const source = saved.complete
+      ? offlineSource(saved)
+      : getBookManifest(id).then((m) => (m.count === saved.count ? m.pageUrl : null)).catch(() => null)
+        .then((pageUrl) => offlineSource(saved, pageUrl ? (i, w) => pageUrl(i, w) : null));
+    openReader({ book, source, reportUrl, externalUrl: `https://archive.org/details/${encodeURIComponent(id)}` });
+    return;
+  }
+  if (!navigator.onLine) { toast('You’re offline. Books you’ve downloaded are in My Shelf → Downloaded.'); return; }
   const source = getBookManifest(id).then((m) => ({
     count: m.count,
     aspect: m.aspect || 0,
@@ -918,7 +1046,8 @@ function renderShelf() {
       .map((s) => ({ title: s.label, ml: s.ml, items: entries.filter((e) => e.status === s.id) })),
     { title: 'Bookmarked', ml: 'അടയാളപ്പെടുത്തിയവ', items: entries.filter((e) => !e.status && e.bookmarks?.length) },
   ];
-  const any = groups.some((g) => g.items.length);
+  const downloaded = listOffline().filter((r) => r.book && (state.category === 'all' || r.book.category === state.category));
+  const any = groups.some((g) => g.items.length) || downloaded.length > 0;
   let html = `<section class="section"><div class="section-h"><h2>My Shelf</h2><span class="count">എന്റെ പുസ്തകങ്ങൾ</span></div>`;
   if (!any) {
     html += emptyState(
@@ -927,6 +1056,13 @@ function renderShelf() {
       '<button class="btn small" data-act="library">Browse the library</button>');
   }
   html += '</section>';
+  if (downloaded.length) {
+    const partial = downloaded.filter((r) => !r.complete).length;
+    html += `<section class="section shelf-group"><div class="section-h"><h2>Downloaded</h2>
+      <span class="count">${downloaded.length} · ${fmtBytes(downloaded.reduce((n, r) => n + (r.bytes || 0), 0))}${partial ? ` · ${partial} unfinished` : ''}</span></div>
+      <ul class="grid" role="list">${downloaded.map((r) => cardHtml({ ...r.book, state: 'READ' })).join('')}</ul>
+      <p class="fine"><button class="more-link" data-act="dl-clear">Remove all downloads</button> to free up space on this device.</p></section>`;
+  }
   for (const g of groups) {
     if (!g.items.length) continue;
     g.items.sort((a, b) => b.updated - a.updated);

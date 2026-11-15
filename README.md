@@ -98,7 +98,8 @@ Things to know:
 - **Public means public.** The site and the repository are open to anyone on the internet, so only
   publish books you wrote or that are free to share (public domain or openly licensed). The form asks
   you to confirm this.
-- Public PDFs can be up to 50 MB (`CONFIG.publicBooks.maxMb`). GitHub asks repositories to stay
+- Public PDFs can be up to 100 MB (`CONFIG.publicBooks.maxMb`), which is GitHub's own per-file
+  ceiling. Very large uploads need a steady connection and may fail on older phones. GitHub asks repositories to stay
   under about 1 GB in total, so this suits a small shared collection, not a large one.
 - To remove a public book, open it on a device that has the token and choose **Remove for everyone**.
   You can also delete its files and its entry in `public-books/index.json` on GitHub.

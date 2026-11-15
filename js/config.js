@@ -57,7 +57,7 @@ export const CONFIG = {
     repo: 'AbhiNav-S-Biju/Annie-s-Library', // "owner/repo" of this site
     branch: 'main',
     dir: 'public-books',
-    maxMb: 50, // GitHub's API accepts files up to 100 MB; 50 keeps uploads workable on phones
+    maxMb: 100, // GitHub rejects any file over 100 MB, so this is the ceiling. Large uploads need a good connection.
   },
 
   // Where "Report bad scan" goes. If githubRepo is set ("owner/repo"), a prefilled GitHub issue opens;

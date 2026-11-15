@@ -27,7 +27,7 @@ function explain(status, fallback) {
   if (status === 401) return 'GitHub rejected the access token. Check it and paste it again.';
   if (status === 403 || status === 404) return 'This token can’t write to the library’s repository. It needs “Contents: Read and write” on that repo.';
   if (status === 409 || status === 422) return 'GitHub was busy with another change. Please try again.';
-  if (status === 413) return 'The file is too large for GitHub.';
+  if (status === 413 || status === 502 || status === 504) return 'GitHub couldn’t take a file this large. Try a smaller PDF (compressing it usually helps).';
   return fallback || `GitHub error (HTTP ${status}).`;
 }
 
@@ -45,7 +45,28 @@ async function gh(url, { method = 'GET', body, token = getToken() } = {}) {
   return res.status === 204 ? {} : res.json();
 }
 
-/** PUT with upload progress (fetch has none). */
+/**
+ * Request body for uploading a file, built in pieces: {"message":…,"branch":…,"content":"<base64>"}.
+ * Encoding 3 bytes -> 4 characters chunk by chunk keeps memory near the file's own size; one big
+ * base64 string plus JSON.stringify would hold several copies (too much for a 100 MB PDF on a phone).
+ */
+export async function uploadBody(file, meta, onProgress) {
+  const CHUNK = 3 * 256 * 1024; // multiple of 3, so chunks join into valid base64
+  const head = JSON.stringify({ ...meta, content: '' }).slice(0, -2); // …,"content":"
+  const parts = [head];
+  for (let off = 0; off < file.size; off += CHUNK) {
+    const bytes = new Uint8Array(await file.slice(off, off + CHUNK).arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    parts.push(btoa(bin));
+    onProgress?.(Math.min(1, (off + CHUNK) / file.size));
+    if (off % (CHUNK * 8) === 0) await new Promise((r) => setTimeout(r)); // let the page breathe
+  }
+  parts.push('"}');
+  return new Blob(parts, { type: 'application/json' });
+}
+
+/** PUT with upload progress (fetch has none). `body` is an object or a ready-made Blob. */
 function putWithProgress(url, body, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -56,7 +77,8 @@ function putWithProgress(url, body, onProgress) {
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
     xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve(JSON.parse(xhr.responseText || '{}')) : reject(new PublishError(explain(xhr.status))));
     xhr.onerror = () => reject(new PublishError('Upload failed. Check your connection and try again.'));
-    xhr.send(JSON.stringify(body));
+    xhr.ontimeout = () => reject(new PublishError('The upload took too long. Try again on a faster connection.'));
+    xhr.send(body instanceof Blob ? body : JSON.stringify(body));
   });
 }
 
@@ -161,8 +183,8 @@ export async function publishBook({ file, title, author = '', category = 'other'
   const dir = P().dir;
 
   onProgress?.(0, 'Preparing');
-  const pdf64 = await fileToBase64(file);
-  await putWithProgress(contentsUrl(`${dir}/${id}.pdf`), { message: `Add public book: ${title}`, branch: P().branch, content: pdf64 }, (f) => onProgress?.(f * 0.9, 'Uploading'));
+  const body = await uploadBody(file, { message: `Add public book: ${title}`, branch: P().branch }, (f) => onProgress?.(f * 0.1, 'Preparing'));
+  await putWithProgress(contentsUrl(`${dir}/${id}.pdf`), body, (f) => onProgress?.(0.1 + f * 0.8, 'Uploading'));
 
   let coverName = null;
   if (cover) {

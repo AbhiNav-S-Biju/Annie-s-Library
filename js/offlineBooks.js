@@ -108,7 +108,7 @@ async function ensureSpace(needBytes) {
 export function fmtBytes(n) {
   if (n >= 1073741824) return `${(n / 1073741824).toFixed(1)} GB`;
   if (n >= 1048576) return `${Math.round(n / 1048576)} MB`;
-  return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return n > 0 ? `${Math.max(1, Math.round(n / 1024))} KB` : '0 KB';
 }
 
 // ---------------------------------------------------------------- downloading

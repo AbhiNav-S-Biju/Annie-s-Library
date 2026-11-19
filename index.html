@@ -29,6 +29,7 @@
   <header class="app-header">
     <div class="brand-row">
       <h1 class="brand">Annie's Library <small lang="ml">ആനിയുടെ ലൈബ്രറി · മലയാള പുസ്തകങ്ങൾ</small></h1>
+      <button class="icon-btn notif-btn" id="notif-btn" aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false"><span data-icon="bell"></span><span class="notif-count" hidden></span></button>
       <button class="icon-btn" id="theme-btn" aria-label="Theme: follow system"></button>
     </div>
     <div id="library-controls">
@@ -55,11 +56,25 @@
 
   <main id="main" tabindex="-1"></main>
 
-  <nav class="tabbar" aria-label="Sections">
-    <button class="tab" data-tab="library" aria-current="page"><span data-icon="library"></span><span>Library</span></button>
-    <button class="tab" data-tab="shelf"><span data-icon="shelf"></span><span>My Shelf</span></button>
-    <button class="tab" data-action="add-pdf"><span data-icon="upload"></span><span>Add book</span></button>
+  <nav class="tabbar dock" aria-label="Sections">
+    <div class="dock-inner">
+      <button class="tab" data-tab="library" aria-label="Library" aria-current="page"><span class="tab-icon" data-icon="library"></span><span class="tab-label">Library</span></button>
+      <button class="tab" data-tab="shelf" aria-label="My Shelf"><span class="tab-icon" data-icon="shelf"></span><span class="tab-label">My Shelf</span></button>
+      <button class="tab" data-tab="downloads" aria-label="Downloads"><span class="tab-icon" data-icon="offline"></span><span class="tab-label">Downloads</span></button>
+      <button class="tab" data-action="add-pdf" aria-label="Add book"><span class="tab-icon" data-icon="upload"></span><span class="tab-label">Add book</span></button>
+    </div>
   </nav>
+
+  <!-- "Gooey" filter for the download button: the stop button separates from the pill like a droplet. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <filter id="goo" x="-20%" y="-50%" width="140%" height="200%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur"/>
+        <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10" result="goo"/>
+        <feComposite in="SourceGraphic" in2="goo" operator="atop"/>
+      </filter>
+    </defs>
+  </svg>
 
   <input type="file" id="pdf-input" accept="application/pdf,.pdf" hidden>
   <div class="app-toast" id="toast" role="status" hidden></div>

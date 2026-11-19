@@ -27,5 +27,7 @@ export const icons = {
   download: svg('<path d="M12 4v11M7 11l5 5 5-5"/><path d="M4 18v2h16v-2"/>'),
   check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
   offline: svg('<path d="M12 4v10M8 10l4 4 4-4"/><path d="M5 19h14"/>'),
+  bell: svg('<path d="M6 9a6 6 0 0112 0c0 5 2 6.5 2 6.5H4S6 14 6 9z"/><path d="M10 19a2 2 0 004 0"/>'),
+  stop: svg('<rect x="7" y="7" width="10" height="10" rx="2.2" fill="currentColor" stroke="none"/>'),
   trash:svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'),
 };

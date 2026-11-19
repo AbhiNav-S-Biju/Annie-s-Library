@@ -74,8 +74,10 @@ The list is fetched fresh on each visit, so edits show up after a deploy without
 
 Open any free-to-read book and tap **Download for offline**. The pages are saved on that device, and
 the book then opens in the same page-flip reader with no internet. Downloaded books show a small
-arrow mark on their cover and are listed under **My Shelf → Downloaded**, where you can also see how
-much space they use and remove them.
+arrow mark on their cover and are listed under **Downloads** in the bottom bar, where you can also see how much
+space they use and remove them. The download button shows its progress as it fills; tap the round
+stop button beside it to cancel, and a short sound plays when the download finishes (switch it off in
+the notifications panel).
 
 - **Internet Archive books:** each page is saved as an image (about 0.2 MB per page, so a 200-page
   book is around 40 MB). A download takes a few minutes. It can run in the background while you browse
@@ -100,6 +102,21 @@ Limits:
   keep it, and reopens a book as "Resume download" if pages went missing.
 - If Internet Archive is slow or busy, a few pages may fail; the book then shows **Resume download**.
 - Opening a downloaded book resumes at your last page, the same as online.
+
+## New-book notifications
+
+The bell at the top right shows when a book has been added to the library since you last looked (a new
+entry in `featured.json` or a new shared book). Tap a notification to open that book. There's no server,
+so this works by checking those lists when the app opens, when you come back to it, and every 10 minutes
+while it's open (`CONFIG.notifications.checkEveryMs`). It can't alert a closed app; real push alerts
+would need a server. The first time the app runs on a device, everything already there counts as seen.
+
+## Sounds
+
+The download-complete cue is synthesised in the browser (`js/sounds.js`), an original sound inspired
+by "Landed" on bencho.dev. Bencho's own sound files can only be downloaded with a Bencho Pro account;
+if you have one, put the WAV in the site and set `CONFIG.sounds.downloadComplete` to its path (for
+example `'sounds/landed.wav'`) to use it instead.
 
 ## Add your own books (Private or Public)
 
@@ -175,6 +192,8 @@ js/search/          the search engine (no UI code):
 js/sources/*.js     Internet Archive, Google Books, Open Library
 js/pdf.js           PDF.js rendering + IndexedDB storage for your own PDFs
 js/offlineBooks.js  offline downloads: IIIF page download, resume, storage, offline reader source
+js/notifications.js new-book notifications (seen list, read state)
+js/sounds.js        synthesised download-complete sound
 js/storage.js       localStorage wrappers (all in try/catch), API response cache
 sw.js               offline app shell, cached libraries/fonts/covers
 ```

@@ -14,6 +14,8 @@ import { loadPageFlip } from './vendor.js';
 import { manglishToMalayalam } from './search/transliteration.js';
 import { HttpError } from './net.js';
 import { canDownload, downloadBook, removeOffline, offlineInfo, isDownloaded, listOffline, totalOfflineBytes, offlineSource, onOfflineChange, reconcile, fmtBytes, OfflineError } from './offlineBooks.js';
+import { primeAudio, downloadComplete, soundsEnabled, setSoundsEnabled } from './sounds.js';
+import { syncNewBooks, markSeen, listNotices, unreadCount, markRead, markAllRead, timeAgo } from './notifications.js';
 import { listPublicBooks, publishBook, unpublishBook, fetchPublicPdf, getToken, setToken, checkToken, canPublish } from './publicBooks.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -39,6 +41,7 @@ const state = {
 
 window.__mlib = state; // handy for debugging in the console
 state.findBook = (key) => findBook(key);
+state.checkNewBooks = (refetch = true) => checkNewBooks(refetch);
 
 // ---------------- boot ----------------
 async function init() {
@@ -49,8 +52,11 @@ async function init() {
   applyTheme();
   bindUi();
   renderLibrary(); // skeletons right away
+  initDock();
+  initNotifications();
   await Promise.all([loadFeatured(), loadShared()]);
   search();
+  checkNewBooks(false);
   registerSw();
   reconcile().then((gone) => { if (gone.length) renderCurrent(); }).catch(() => {});
   onOfflineChange(() => { if (!document.querySelector('.reader')) renderCurrent(); });
@@ -166,7 +172,7 @@ function bindUi() {
     if (act.dataset.act === 'clear') { q.value = ''; $('#clear-q').hidden = true; setQuery(''); }
     if (act.dataset.act === 'all') setCategory('all');
     if (act.dataset.act === 'library') setTab('library');
-    if (act.dataset.act === 'open-downloads') setTab('shelf');
+    if (act.dataset.act === 'open-downloads') setTab('downloads');
     if (act.dataset.act === 'dl-clear') clearDownloads();
     if (act.dataset.act === 'use-ml') { q.value = act.dataset.text; $('#clear-q').hidden = false; setQuery(q.value); }
   });
@@ -362,7 +368,7 @@ function renderTranslitHint() {
   hint.innerHTML = `Also searching <button type="button" data-text="${esc(alt)}" lang="ml">${esc(alt)}</button>`;
 }
 
-function renderCurrent() { if (state.tab === 'shelf') renderShelf(); else renderLibrary(); }
+function renderCurrent() { if (state.tab === 'shelf') renderShelf(); else if (state.tab === 'downloads') renderDownloads(); else renderLibrary(); }
 
 function offlineBanner() {
   if (navigator.onLine || !listOffline().length) return '';
@@ -548,7 +554,7 @@ function createSheet(label) {
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) done(); else setTimeout(done, 300);
     if (sheetClose === close) sheetClose = null;
     prevFocus?.focus?.({ preventScroll: true });
-    if (state.tab === 'shelf') renderShelf(); else renderLibrary(); // statuses/progress may have changed
+    renderCurrent(); // statuses/progress/downloads may have changed
   });
   sheetClose = close;
   backdrop.addEventListener('click', close);
@@ -759,6 +765,7 @@ async function holdScreen(on) {
 
 async function startDownload(book) {
   if (jobs.has(book.key)) return;
+  primeAudio(); // unlock audio during this tap so the finish sound can play later
   const ctrl = new AbortController();
   const job = { done: 0, total: book.shared ? book.size || 0 : 0, bytes: 0, failed: 0, kind: book.shared ? 'pdf' : 'pages', ctrl };
   jobs.set(book.key, job);
@@ -767,6 +774,7 @@ async function startDownload(book) {
   emitJob(book.key);
   try {
     await downloadBook(book, { signal: ctrl.signal, onProgress: (p) => { Object.assign(job, p); emitJob(book.key); } });
+    downloadComplete();
     toast(`“${book.title}” is saved for offline reading.`);
   } catch (e) {
     if (e?.name === 'AbortError') toast('Download stopped. What was saved is kept, so you can resume later.');
@@ -782,28 +790,66 @@ async function startDownload(book) {
   }
 }
 
+/*
+ * Download control: a pill-shaped progress button. Press it and a round stop button buds off its
+ * right side like a droplet while the fill runs (tap it to change your mind); when the download
+ * finishes the droplet melts back in and the label reads "Saved offline". The droplet effect is an
+ * SVG "goo" filter (#goo in index.html) over the two shapes. Interaction design after Aviral's
+ * "Progress button" (x.com/aviralj02, via bencho.dev/finds); this is an independent implementation.
+ */
+function downloadButtonHtml() {
+  return `<div class="pbtn" data-mode="idle">
+      <span class="pbtn-goo" aria-hidden="true"><i class="pbtn-pill"></i><i class="pbtn-drop"></i></span>
+      <button class="pbtn-main" data-dl type="button"><span class="pbtn-fill"></span><span class="pbtn-label"><span class="pbtn-icon"></span><span class="pbtn-text">Download for offline</span></span></button>
+      <button class="pbtn-stop" data-dl-cancel type="button" aria-label="Stop download" tabindex="-1">${icons.stop}</button>
+    </div>
+    <div class="pbtn-extra"></div>`;
+}
+
 function renderDownloadSlot(slot, book, hint = '') {
+  if (!slot.querySelector('.pbtn')) slot.innerHTML = downloadButtonHtml();
+  const btn = slot.querySelector('.pbtn');
+  const main = btn.querySelector('.pbtn-main');
+  const stop = btn.querySelector('.pbtn-stop');
+  const text = btn.querySelector('.pbtn-text');
+  const icon = btn.querySelector('.pbtn-icon');
+  const extra = slot.querySelector('.pbtn-extra');
   const job = jobs.get(book.key);
   const rec = offlineInfo(book.key);
   const err = lastError.get(book.key);
+  let mode, label, ico = icons.download, pct = 0, extraHtml = '';
+
   if (job) {
-    const pct = job.total ? Math.min(100, Math.round((job.done / job.total) * 100)) : 0;
-    const what = job.kind === 'pdf' ? 'Downloading…' : `Downloading ${job.done} of ${job.total || '…'} pages · ${fmtBytes(job.bytes)}`;
-    slot.innerHTML = `<div class="dl" role="group" aria-label="Download progress">
-      <div class="dl-row"><span class="dl-text">${esc(what)}</span><button class="btn small ghost" data-dl-cancel>Cancel</button></div>
-      <div class="bar"${job.kind === 'pdf' ? ' data-indeterminate' : ''}><i style="width:${job.kind === 'pdf' ? 100 : pct}%"></i></div>
-      <p class="fine">You can close this and keep browsing. Keep the app open until it finishes.</p></div>`;
+    mode = 'active';
+    pct = job.kind === 'pdf' ? 0 : (job.total ? Math.min(1, job.done / job.total) : 0);
+    label = job.kind === 'pdf' ? 'Downloading…' : `Downloading ${Math.round(pct * 100)}%`;
+    ico = '';
+    extraHtml = `<p class="fine">${job.kind === 'pdf' ? 'Saving the PDF on this device.' : `${job.done} of ${job.total || '…'} pages · ${esc(fmtBytes(job.bytes))}.`} You can close this and keep browsing.</p>`;
   } else if (rec?.complete) {
-    slot.innerHTML = `<div class="dl dl-done"><span class="dl-text">${icons.check}<span>Saved offline · ${esc(fmtBytes(rec.bytes))}</span></span>
-      <button class="btn small ghost" data-dl-remove>Remove download</button></div>`;
+    mode = 'done';
+    pct = 1;
+    label = `Saved offline · ${fmtBytes(rec.bytes)}`;
+    ico = icons.check;
+    extraHtml = '<button class="more-link" data-dl-remove>Remove download</button>';
   } else if (rec && rec.kind === 'pages' && rec.have > 0) {
-    slot.innerHTML = `<button class="btn block ghost" data-dl>${icons.download}<span>Resume download · ${rec.have} of ${rec.count} pages</span></button>
-      ${err ? `<p class="form-error" role="alert">${esc(err)}</p>` : ''}
-      <button class="more-link" data-dl-remove>Discard the ${esc(fmtBytes(rec.bytes))} downloaded so far</button>`;
+    mode = 'idle';
+    pct = rec.count ? rec.have / rec.count : 0;
+    label = `Resume download · ${rec.have} of ${rec.count}`;
+    extraHtml = `${err ? `<p class="form-error" role="alert">${esc(err)}</p>` : ''}<button class="more-link" data-dl-remove>Discard the ${esc(fmtBytes(rec.bytes))} downloaded so far</button>`;
   } else {
-    slot.innerHTML = `<button class="btn block ghost" data-dl>${icons.download}<span>Download for offline</span></button>
-      ${err ? `<p class="form-error" role="alert">${esc(err)}</p>` : `<p class="fine">${esc(hint || 'Saves the pages on this device so you can read without internet.')}</p>`}`;
+    mode = 'idle';
+    label = 'Download for offline';
+    extraHtml = err ? `<p class="form-error" role="alert">${esc(err)}</p>` : `<p class="fine">${esc(hint || 'Saves the pages on this device so you can read without internet.')}</p>`;
   }
+  btn.dataset.mode = mode;
+  btn.style.setProperty('--p', String(pct));
+  if (text.textContent !== label) text.textContent = label;
+  if (icon.innerHTML !== ico) icon.innerHTML = ico;
+  main.disabled = mode !== 'idle';
+  main.setAttribute('aria-label', mode === 'active' ? `${label}. Use the stop button to cancel.` : label);
+  stop.tabIndex = mode === 'active' ? 0 : -1;
+  stop.setAttribute('aria-hidden', String(mode !== 'active'));
+  if (extra.dataset.html !== extraHtml) { extra.innerHTML = extraHtml; extra.dataset.html = extraHtml; }
 }
 
 function setupDownloadSlot(slot, book, signal) {
@@ -825,6 +871,7 @@ function setupDownloadSlot(slot, book, signal) {
     else if (e.target.closest('[data-dl-cancel]')) jobs.get(book.key)?.ctrl.abort();
     else if (e.target.closest('[data-dl-remove]')) {
       await removeOffline(book);
+      lastError.delete(book.key);
       toast('Download removed from this device.');
       draw();
     }
@@ -855,7 +902,7 @@ function openBook(book) {
     openReader({ book, source, reportUrl, externalUrl: `https://archive.org/details/${encodeURIComponent(id)}` });
     return;
   }
-  if (!navigator.onLine) { toast('You’re offline. Books you’ve downloaded are in My Shelf → Downloaded.'); return; }
+  if (!navigator.onLine) { toast('You’re offline. Books you’ve downloaded are under Downloads.'); return; }
   const source = getBookManifest(id).then((m) => ({
     count: m.count,
     aspect: m.aspect || 0,
@@ -993,6 +1040,7 @@ function openAddBookForm(file) {
       await pdf.savePdf(file, book.key); // so it opens instantly here, before the site rebuilds
       if (cover) book.coverUrl = await pdf.blobToDataUrl(cover);
       state.shared = [book, ...state.shared];
+      markSeen([book.key]);
       close();
       toast('Published. Other devices will see it in about a minute.');
       search();
@@ -1034,7 +1082,7 @@ function setTab(tab) {
   $('.search').hidden = tab !== 'library';
   $('#scope').hidden = tab !== 'library';
   $('#translit-hint').hidden = tab !== 'library' || !state.alt?.length || !state.query;
-  if (tab === 'shelf') renderShelf(); else renderLibrary();
+  renderCurrent();
   window.scrollTo({ top: 0 });
 }
 
@@ -1046,8 +1094,7 @@ function renderShelf() {
       .map((s) => ({ title: s.label, ml: s.ml, items: entries.filter((e) => e.status === s.id) })),
     { title: 'Bookmarked', ml: 'അടയാളപ്പെടുത്തിയവ', items: entries.filter((e) => !e.status && e.bookmarks?.length) },
   ];
-  const downloaded = listOffline().filter((r) => r.book && (state.category === 'all' || r.book.category === state.category));
-  const any = groups.some((g) => g.items.length) || downloaded.length > 0;
+  const any = groups.some((g) => g.items.length);
   let html = `<section class="section"><div class="section-h"><h2>My Shelf</h2><span class="count">എന്റെ പുസ്തകങ്ങൾ</span></div>`;
   if (!any) {
     html += emptyState(
@@ -1056,13 +1103,6 @@ function renderShelf() {
       '<button class="btn small" data-act="library">Browse the library</button>');
   }
   html += '</section>';
-  if (downloaded.length) {
-    const partial = downloaded.filter((r) => !r.complete).length;
-    html += `<section class="section shelf-group"><div class="section-h"><h2>Downloaded</h2>
-      <span class="count">${downloaded.length} · ${fmtBytes(downloaded.reduce((n, r) => n + (r.bytes || 0), 0))}${partial ? ` · ${partial} unfinished` : ''}</span></div>
-      <ul class="grid" role="list">${downloaded.map((r) => cardHtml({ ...r.book, state: 'READ' })).join('')}</ul>
-      <p class="fine"><button class="more-link" data-act="dl-clear">Remove all downloads</button> to free up space on this device.</p></section>`;
-  }
   for (const g of groups) {
     if (!g.items.length) continue;
     g.items.sort((a, b) => b.updated - a.updated);
@@ -1072,6 +1112,165 @@ function renderShelf() {
   }
   $('#main').innerHTML = html;
   settleCovers($('#main'));
+}
+
+function renderDownloads() {
+  const downloaded = listOffline().filter((r) => r.book && (state.category === 'all' || r.book.category === state.category));
+  const total = downloaded.reduce((n, r) => n + (r.bytes || 0), 0);
+  const partial = downloaded.filter((r) => !r.complete).length;
+  let html = `<section class="section"><div class="section-h"><h2>Downloads</h2>
+    <span class="count">${downloaded.length ? `${downloaded.length} · ${esc(fmtBytes(total))}${partial ? ` · ${partial} unfinished` : ''}` : 'ഡൗൺലോഡുകൾ'}</span></div>`;
+  if (!downloaded.length) {
+    html += emptyState(
+      state.category === 'all' ? 'No downloads yet.' : `No downloaded ${catLabel(state.category).toLowerCase()} books.`,
+      'Open a free book and tap “Download for offline” to read it without internet.',
+      '<button class="btn small" data-act="library">Browse the library</button>');
+  } else {
+    html += `<ul class="grid" role="list">${downloaded.map((r) => cardHtml({ ...r.book, state: 'READ' })).join('')}</ul>
+      <p class="fine"><button class="more-link" data-act="dl-clear">Remove all downloads</button> to free up space on this device.</p>`;
+  }
+  html += '</section>';
+  $('#main').innerHTML = html;
+  settleCovers($('#main'));
+}
+
+// ---------------- dock (bottom navigation on phone/tablet) ----------------
+// A magnifying dock: icons swell toward your finger (or mouse), the nearest growing most. On touch,
+// press and slide along the dock; lifting your finger opens the item under it. Laptop widths show
+// the tabs in the header instead (CSS), so the effect is off there.
+function initDock() {
+  const dock = $('.dock');
+  const items = [...dock.querySelectorAll('.tab')];
+  const wide = matchMedia('(min-width: 1024px)');
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+  const MAX = 0.55, RANGE = 96;
+  let pressing = null; // pointerId while a finger/mouse button is down on the dock
+
+  const magnify = (x) => {
+    if (wide.matches || still.matches) return;
+    dock.classList.add('magnifying');
+    for (const b of items) {
+      const r = b.getBoundingClientRect();
+      const d = Math.abs(x - (r.left + r.width / 2));
+      const k = Math.max(0, 1 - d / RANGE);
+      b.style.setProperty('--s', (1 + MAX * k * k).toFixed(3));
+      b.classList.toggle('near', k > 0.6);
+    }
+  };
+  const reset = () => {
+    dock.classList.remove('magnifying');
+    items.forEach((b) => { b.style.removeProperty('--s'); b.classList.remove('near'); });
+  };
+  const itemAt = (x, y) => document.elementFromPoint(x, y)?.closest?.('.dock .tab');
+
+  dock.addEventListener('pointerdown', (e) => { pressing = e.pointerId; dock.dataset.downOn = itemAt(e.clientX, e.clientY)?.dataset.tab || itemAt(e.clientX, e.clientY)?.dataset.action || ''; magnify(e.clientX); });
+  dock.addEventListener('pointermove', (e) => { if (pressing === e.pointerId || e.pointerType === 'mouse') magnify(e.clientX); });
+  window.addEventListener('pointerup', (e) => {
+    if (pressing !== e.pointerId) return;
+    pressing = null;
+    const target = itemAt(e.clientX, e.clientY);
+    const id = target?.dataset.tab || target?.dataset.action || '';
+    // slid onto a different item than the one pressed: open that one (a plain tap is handled by click)
+    if (target && id !== dock.dataset.downOn) target.click();
+    if (e.pointerType !== 'mouse') reset();
+  });
+  window.addEventListener('pointercancel', () => { pressing = null; reset(); });
+  dock.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && pressing === null) reset(); });
+}
+
+// ---------------- notifications ----------------
+let lastCheck = 0;
+
+function initNotifications() {
+  const btn = $('#notif-btn');
+  btn.addEventListener('click', () => (document.querySelector('.notif-panel') ? closeNotifPanel() : openNotifPanel()));
+  renderNotifBadge();
+  setInterval(() => { if (document.visibilityState === 'visible') checkNewBooks(true); }, CONFIG.notifications.checkEveryMs);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && Date.now() - lastCheck > 2 * 60 * 1000) checkNewBooks(true);
+  });
+}
+
+/** Look for books this device hasn't seen. `refetch` reloads the featured/shared lists first. */
+async function checkNewBooks(refetch) {
+  lastCheck = Date.now();
+  if (refetch) {
+    if (!navigator.onLine) return;
+    const before = state.shared.map((b) => b.key).join('|') + '#' + state.featured.map((b) => b.key).join('|');
+    await Promise.all([loadFeatured(), loadShared()]);
+    const after = state.shared.map((b) => b.key).join('|') + '#' + state.featured.map((b) => b.key).join('|');
+    if (before !== after && state.tab === 'library' && !state.query && !document.querySelector('.reader')) search();
+  }
+  const fresh = syncNewBooks([...state.featured, ...state.shared]);
+  renderNotifBadge();
+  if (document.querySelector('.notif-panel')) renderNotifPanel();
+  if (fresh.length) toast(fresh.length === 1 ? `New book: ${fresh[0].title}` : `${fresh.length} new books added`);
+}
+
+function renderNotifBadge() {
+  const n = unreadCount();
+  const badge = $('#notif-btn .notif-count');
+  badge.hidden = !n;
+  badge.textContent = n > 9 ? '9+' : String(n);
+  $('#notif-btn').setAttribute('aria-label', n ? `Notifications, ${n} new` : 'Notifications');
+}
+
+let notifClose = null;
+function openNotifPanel() {
+  const panel = document.createElement('div');
+  panel.className = 'notif-panel';
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', 'Notifications');
+  document.body.appendChild(panel);
+  $('#notif-btn').setAttribute('aria-expanded', 'true');
+  renderNotifPanel();
+  requestAnimationFrame(() => panel.classList.add('on'));
+  const onDoc = (e) => { if (!panel.contains(e.target) && !e.target.closest('#notif-btn')) close(); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const close = pushOverlay(() => {
+    document.removeEventListener('pointerdown', onDoc, true);
+    document.removeEventListener('keydown', onKey);
+    $('#notif-btn').setAttribute('aria-expanded', 'false');
+    panel.classList.remove('on');
+    setTimeout(() => panel.remove(), matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 180);
+    notifClose = null;
+  });
+  notifClose = close;
+  document.addEventListener('pointerdown', onDoc, true);
+  document.addEventListener('keydown', onKey);
+  setTimeout(() => panel.querySelector('button')?.focus({ preventScroll: true }), 60);
+}
+function closeNotifPanel() { notifClose?.(); }
+
+function renderNotifPanel() {
+  const panel = document.querySelector('.notif-panel');
+  if (!panel) return;
+  const items = listNotices();
+  const unread = items.filter((n) => !n.read).length;
+  panel.innerHTML = `
+    <div class="notif-head"><h2>Notifications</h2>${unread ? '<button class="more-link" data-n-all>Mark all as read</button>' : ''}</div>
+    ${items.length ? `<ul class="notif-list" role="list">${items.map((n, i) => `<li><button class="notif-item${n.read ? '' : ' unread'}" data-n="${i}">
+        <span class="notif-cover">${n.coverUrl ? `<img src="${esc(n.coverUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}</span>
+        <span class="notif-text"><span class="notif-kind">New book added</span><span class="notif-title">${esc(n.title)}</span>
+          <span class="notif-meta">${esc([n.author, timeAgo(n.at)].filter(Boolean).join(' · '))}</span></span>
+        ${n.read ? '' : '<span class="notif-dot" aria-label="Unread"></span>'}</button></li>`).join('')}</ul>`
+      : `<div class="notif-empty">${icons.bell}<p><strong>No new books yet.</strong></p><p>When a book is added to the library, it shows up here. Tap it to open the book.</p></div>`}
+    <label class="switch-row notif-sound"><span>Sound when a download finishes</span><input type="checkbox" data-n-sound ${soundsEnabled() ? 'checked' : ''}></label>`;
+  panel.querySelectorAll('[data-n]').forEach((b) => b.addEventListener('click', () => {
+    const n = items[+b.dataset.n];
+    markRead(n.key);
+    renderNotifBadge();
+    const book = [...state.shared, ...state.featured].find((x) => x.key === n.key) || (navigator.onLine ? null : n.book);
+    closeNotifPanel();
+    if (!book) { toast('This book isn’t in the library any more.'); return; }
+    if (state.tab !== 'library') setTab('library');
+    setTimeout(() => openSheet(book), 60); // after the panel's history entry has closed
+  }));
+  panel.querySelector('[data-n-all]')?.addEventListener('click', () => { markAllRead(); renderNotifBadge(); renderNotifPanel(); });
+  panel.querySelector('[data-n-sound]').addEventListener('change', (e) => {
+    setSoundsEnabled(e.target.checked);
+    if (e.target.checked) { primeAudio(); downloadComplete(); } // let them hear it
+  });
 }
 
 // ---------------- theme ----------------

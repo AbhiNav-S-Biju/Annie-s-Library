@@ -51,6 +51,13 @@ export const CONFIG = {
     'punathil kunjabdulla', 'n. s. madhavan',
   ],
 
+  // Sounds. downloadComplete: '' plays the built-in synthesised "landed" cue; set a path such as
+  // 'sounds/landed.wav' to play your own file instead (e.g. Bencho's "Landed" if you have Bencho Pro).
+  sounds: { downloadComplete: '' },
+
+  // How often the open app re-checks the featured and shared lists for new books (notifications).
+  notifications: { checkEveryMs: 10 * 60 * 1000 },
+
   // Public books: PDFs the owner shares with every device. They are committed to this GitHub repo
   // (under `dir`) from inside the app, using an access token the owner enters once on their device.
   publicBooks: {
